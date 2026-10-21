@@ -1,0 +1,11 @@
+{
+  "name": "ecc00hub",
+  "version": "1.0.0",
+  "description": "ECC00 script hub — Discord bot, web panel, Discord↔Roblox link + profile API",
+  "main": "index.js",
+  "scripts": { "start": "node index.js" },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "express": "^4.21.2"
+  }
+}

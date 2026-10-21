@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: ecc00hub
+    env: node
+    plan: free
+    region: ohio
+    buildCommand: npm install
+    startCommand: node index.js
+    envVars:
+      - key: DISCORD_BOT_TOKEN
+        sync: false
+      - key: DISCORD_CLIENT_ID
+        sync: false
+      - key: DISCORD_CLIENT_SECRET
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: PUBLIC_URL
+        sync: false   # set to this service's https url once created, e.g. https://ecc00hub.onrender.com
+      - key: HUB_LOADER
+        value: https://eccohub.xyz/loader.lua
