@@ -59,13 +59,13 @@ function paidReply(user) {
     .setThumbnail(avatarUrl(user))
     .setDescription("**" + (user.globalName || user.username) + "**\nYour key is tied to this account, so the menu shows your name and avatar in game.")
     .addFields(
-      { name: "Games", value: PAID.map((g) => g.emoji + " " + g.name).join("\n") },
+      { name: "Games", value: PAID.map((g) => "- " + g.name).join("\n") },
       { name: "Loadstring", value: "```lua\n" + UNIVERSAL + "\n```" },
     );
 }
 
 function gamesEmbed() {
-  const line = (g) => `${g.emoji} **${g.name}**${g.soon ? " — *soon*" : ""}`;
+  const line = (g) => `- ${g.name}${g.soon ? " (soon)" : ""}`;
   return brand(new EmbedBuilder())
     .setTitle("Supported Games")
     .setThumbnail(LOGO)
@@ -158,7 +158,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         case "update": {
           const g = GAMES.find((x) => x.key === o.getString("game"));
           const v = o.getString("version");
-          const e = brand(new EmbedBuilder()).setTitle(`${g.emoji} ${g.name} updated${v ? ` — ${v}` : ""}`)
+          const e = brand(new EmbedBuilder()).setTitle(`${g.name} updated${v ? ` ${v}` : ""}`)
             .setDescription(lines(o.getString("changes")).map((c) => `• ${c}`).join("\n"))
             .addFields({ name: "Loadstring", value: "```lua\n" + UNIVERSAL + "\n```" })
             .setThumbnail(LOGO).setTimestamp();
