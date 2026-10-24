@@ -22,6 +22,24 @@ const EMBED = 0x0b0b0b; // near-black; Discord treats 0x000000 as "no colour"
 const app = express();
 app.use(express.static(path.join(__dirname, "public")));
 app.get("/health", (_req, res) => res.json({ ok: true, bot: client?.isReady?.() || false, jnkie: jnkie.ready() }));
+// The in-game UI asks this for the badge under your name, so the badge always matches your key's tier.
+// Only the tier and whether it's active go out; never the key itself.
+// ponytail: 60s in-memory cache per user; plenty for one lookup per script launch.
+const tierCache = new Map();
+app.get("/api/tier/:discordId", async (req, res) => {
+  const id = req.params.discordId;
+  if (!/^\d{5,25}$/.test(id)) return res.status(400).json({ error: "bad id" });
+  const hit = tierCache.get(id);
+  if (hit && Date.now() - hit.at < 60_000) return res.json(hit.body);
+  try {
+    const key = await jnkie.keyFor(id);
+    const body = { active: jnkie.active(key), tier: key ? jnkie.tierOf(key) : null };
+    tierCache.set(id, { at: Date.now(), body });
+    res.json(body);
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
 app.get("/health/jnkie", (_req, res) => jnkie.ping()
   .then((services) => res.json({ ok: true, services }))
   .catch((e) => res.status(502).json({ ok: false, error: e.message })));
@@ -52,15 +70,14 @@ function freePanel() {
   return {
     embeds: [brand(new EmbedBuilder()).setTitle("ECC00 Free").setThumbnail(LOGO)
       .setDescription("Paste this into your executor. It picks the right script for the game you're in.")
-      .addFields({ name: "Loadstring", value: lua(UNIVERSAL) }, { name: "Games", value: list(FREE) })],
+      .addFields({ name: "Loadstring", value: lua(UNIVERSAL) })],
   };
 }
 
 function paidPanel() {
   return {
     embeds: [brand(new EmbedBuilder()).setTitle("ECC00 Premium").setThumbnail(LOGO)
-      .setDescription("For whitelisted members. Your key is tied to your Discord account.")
-      .addFields({ name: "Games", value: list(PAID) })],
+      .setDescription("For whitelisted members. Your key is tied to your Discord account.")],
     components: [new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId("paid:script").setLabel("Get Script").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId("paid:hwid").setLabel("Reset HWID").setStyle(ButtonStyle.Secondary),
