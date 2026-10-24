@@ -102,9 +102,11 @@ const cmds = [
     .addStringOption((o) => o.setName("ping").setDescription("Who to ping").addChoices(
       { name: "none", value: "none" }, { name: "@everyone", value: "everyone" }, { name: "@here", value: "here" }))
     .addAttachmentOption((o) => o.setName("image").setDescription("Image")),
-  new SlashCommandBuilder().setName("update").setDescription("Post a script update log").setDefaultMemberPermissions(staff)
-    .addStringOption((o) => o.setName("game").setDescription("Game").setRequired(true)
-      .addChoices(...GAMES.map((g) => ({ name: g.name, value: g.key }))))
+  new SlashCommandBuilder().setName("update").setDescription("Post an update or release log").setDefaultMemberPermissions(staff)
+    .addStringOption((o) => o.setName("game").setDescription("Game, or the loader itself").setRequired(true)
+      .addChoices(...GAMES.map((g) => ({ name: g.name, value: g.key })), { name: "Loader", value: "loader" }))
+    .addStringOption((o) => o.setName("type").setDescription("Update (default) or a new release")
+      .addChoices({ name: "Update", value: "update" }, { name: "Release", value: "release" }))
     .addStringOption((o) => o.setName("changes").setDescription("Changes, separated by ; or \\n").setRequired(true))
     .addStringOption((o) => o.setName("version").setDescription("Version, e.g. v1.4"))
     .addChannelOption((o) => o.setName("channel").setDescription("Where to post (default: here)").addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement))
@@ -155,9 +157,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
           return post(interaction, e);
         }
         case "update": {
-          const g = GAMES.find((x) => x.key === o.getString("game"));
+          const key = o.getString("game");
+          const name = key === "loader" ? "Loader" : GAMES.find((x) => x.key === key).name;
           const v = o.getString("version");
-          const e = brand(new EmbedBuilder()).setTitle(`${g.name} updated${v ? ` ${v}` : ""}`)
+          const released = o.getString("type") === "release";
+          const e = brand(new EmbedBuilder()).setTitle(`${name} ${released ? "released" : "updated"}${v ? ` ${v}` : ""}`)
             .setDescription(lines(o.getString("changes")).map((c) => `• ${c}`).join("\n"))
             .addFields({ name: "Loadstring", value: "```lua\n" + UNIVERSAL + "\n```" })
             .setThumbnail(LOGO).setTimestamp();
