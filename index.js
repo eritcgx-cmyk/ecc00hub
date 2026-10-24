@@ -22,6 +22,9 @@ const EMBED = 0x0b0b0b; // near-black; Discord treats 0x000000 as "no colour"
 const app = express();
 app.use(express.static(path.join(__dirname, "public")));
 app.get("/health", (_req, res) => res.json({ ok: true, bot: client?.isReady?.() || false, jnkie: jnkie.ready() }));
+app.get("/health/jnkie", (_req, res) => jnkie.ping()
+  .then((services) => res.json({ ok: true, services }))
+  .catch((e) => res.status(502).json({ ok: false, error: e.message })));
 
 // ---------------------------------------------------------------- shared bits
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });

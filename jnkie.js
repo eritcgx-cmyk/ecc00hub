@@ -74,4 +74,7 @@ async function unblacklist(key) {
   return hwids.length;
 }
 
-module.exports = { ready, keyFor, whitelist, unwhitelist, resetHwid, blacklist, unblacklist, tierOf, active, expired, hwidsOf };
+// Cheap authenticated call, so a bad key shows up as an error instead of "configured".
+const ping = () => api("GET", "/services").then((d) => (d.services || d).length);
+
+module.exports = { ready, ping, keyFor, whitelist, unwhitelist, resetHwid, blacklist, unblacklist, tierOf, active, expired, hwidsOf };
