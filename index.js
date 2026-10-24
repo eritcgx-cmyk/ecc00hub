@@ -31,29 +31,37 @@ const FREE = GAMES.filter((g) => !g.paid);
 const PAID = GAMES.filter((g) => g.paid);
 const brand = (e) => e.setColor(EMBED).setAuthor({ name: "ECC00", iconURL: LOGO }).setFooter({ text: "eccohub.xyz", iconURL: LOGO });
 
-function buttonRows(games, prefix) {
-  const rows = [];
-  let row = new ActionRowBuilder();
-  for (const g of games) {
-    if (row.components.length === 5) { rows.push(row); row = new ActionRowBuilder(); }
-    row.addComponents(new ButtonBuilder()
-      .setCustomId(`${prefix}:${g.key}`)
-      .setLabel(g.soon ? `${g.name} (soon)` : g.name)
-      .setEmoji(g.emoji)
-      .setStyle(g.soon ? ButtonStyle.Secondary : ButtonStyle.Primary)
-      .setDisabled(Boolean(g.soon)));
-  }
-  if (row.components.length) rows.push(row);
-  return rows;
+function avatarUrl(u) {
+  return u.displayAvatarURL ? u.displayAvatarURL({ extension: "png", size: 128 }) : LOGO;
 }
 
+// Two buttons, nothing else. Free hands over the loadstring; Paid is the Discord-linked side, so it
+// shows who you are and that your key rides on this account.
 function panelMessage() {
   const embed = brand(new EmbedBuilder())
-    .setTitle("Free Scripts")
+    .setTitle("ECC00")
     .setThumbnail(LOGO)
-    .setDescription("Pick a game to get the loadstring.\nOne loadstring works for every game — it loads the right script automatically.\n\n"
-      + `**Paid** (${PAID.map((g) => g.name).join(", ")}) need a key — ask staff.`);
-  return { embeds: [embed], components: buttonRows(FREE, "game") };
+    .setDescription("**Free** - no account needed.\n**Paid** - linked to your Discord.");
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId("get:free").setLabel("Free").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("get:paid").setLabel("Paid").setStyle(ButtonStyle.Primary),
+  );
+  return { embeds: [embed], components: [row] };
+}
+
+function freeReply() {
+  return brand(new EmbedBuilder()).setTitle("Free")
+    .setDescription("```lua\n" + UNIVERSAL + "\n```\n" + FREE.filter((g) => !g.soon).map((g) => g.name).join(" | "));
+}
+
+function paidReply(user) {
+  return brand(new EmbedBuilder()).setTitle("Paid")
+    .setThumbnail(avatarUrl(user))
+    .setDescription("**" + (user.globalName || user.username) + "**\nYour key is tied to this account, so the menu shows your name and avatar in game.")
+    .addFields(
+      { name: "Games", value: PAID.map((g) => g.emoji + " " + g.name).join("\n") },
+      { name: "Loadstring", value: "```lua\n" + UNIVERSAL + "\n```" },
+    );
 }
 
 function gamesEmbed() {
@@ -130,16 +138,6 @@ async function post(interaction, embed) {
 }
 const lines = (s) => s.split(/\\n|\n|;/).map((x) => x.trim()).filter(Boolean);
 
-async function sendLoadstring(interaction, game) {
-  // Personal loadstring (shows their Discord in the menu) when the link store is configured, else the universal one.
-  // One loadstring for everyone. A paid user's key is tied to their Discord account on JNKIE's side,
-  // so the script knows who they are without the hub handing out per-user links.
-  const ls = UNIVERSAL;
-  const e = brand(new EmbedBuilder()).setTitle(game ? `${game.emoji} ${game.name}` : "Your loadstring")
-    .setDescription(`${game ? `Join **${game.name}** and run:` : "Run in any supported game:"}\n\`\`\`lua\n${ls}\n\`\`\``);
-  return interaction.reply({ embeds: [e], ephemeral: true });
-}
-
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
     if (interaction.isChatInputCommand()) {
@@ -149,7 +147,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           await interaction.channel.send(panelMessage());
           return interaction.reply({ content: "Panel posted.", ephemeral: true });
         case "games": return interaction.reply({ embeds: [gamesEmbed()] });
-        case "getscript": return sendLoadstring(interaction, null);
+        case "getscript": return interaction.reply({ embeds: [freeReply()], ephemeral: true });
         case "announce": {
           const e = brand(new EmbedBuilder()).setTitle(o.getString("title"))
             .setDescription(lines(o.getString("message")).join("\n")).setTimestamp();
@@ -178,10 +176,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
           return interaction.reply({ content: fixedStatus ? `Status set: ${type} ${fixedStatus.name}` : "Status reset to rotation.", ephemeral: true });
         }
       }
-    } else if (interaction.isButton() && interaction.customId.startsWith("game:")) {
-      const game = GAMES.find((g) => g.key === interaction.customId.slice(5));
-      if (!game || game.soon) return interaction.reply({ content: "That one isn't out yet.", ephemeral: true });
-      return sendLoadstring(interaction, game);
+    } else if (interaction.isButton() && interaction.customId.startsWith("get:")) {
+      const paid = interaction.customId === "get:paid";
+      return interaction.reply({ embeds: [paid ? paidReply(interaction.user) : freeReply()], ephemeral: true });
     }
   } catch (e) {
     console.error("interaction:", e.message);

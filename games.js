@@ -6,5 +6,5 @@ module.exports = [
   { key: "mm2",      name: "Murder Mystery 2", emoji: "🔪" },
   { key: "amber",    name: "Amber Alert",      emoji: "🚨" },
   { key: "universal",name: "Universal",        emoji: "🌐" },
-  { key: "verity",   name: "Survive Verity (Area 51)", emoji: "🧪", soon: true },
+  { key: "verity",   name: "Survive Verity (Area 51)", emoji: "🧪", place: 74716719697996 },
 ];
