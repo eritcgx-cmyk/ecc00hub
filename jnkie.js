@@ -23,7 +23,7 @@ const TIER_PREFIX = "ECC00 ";
 const tierOf = (key) => (key.key_name || "").startsWith(TIER_PREFIX) ? key.key_name.slice(TIER_PREFIX.length) : "premium";
 
 const expired = (key) => key.expires_at && new Date(key.expires_at) <= new Date();
-const active = (key) => key && !key.is_invalidated && !expired(key);
+const active = (key) => Boolean(key && !key.is_invalidated && !expired(key));
 
 // A user's whitelist entry: their newest key, or null.
 async function keyFor(discordId) {
