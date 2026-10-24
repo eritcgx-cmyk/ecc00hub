@@ -22,8 +22,9 @@ const EMBED = 0x0b0b0b; // near-black; Discord treats 0x000000 as "no colour"
 const app = express();
 app.use(express.static(path.join(__dirname, "public")));
 app.get("/health", (_req, res) => res.json({ ok: true, bot: client?.isReady?.() || false, jnkie: jnkie.ready() }));
-// The in-game UI asks this for the badge under your name, so the badge always matches your key's tier.
-// Only the tier and whether it's active go out; never the key itself.
+// The in-game UI asks this for the profile frame: tier (the badge), Discord name and avatar. JNKIE only hands
+// the script a Discord *ID* for keys made with /whitelist, so the bot resolves the name/avatar itself.
+// Never returns the key, and only returns a profile for someone with an active key.
 // ponytail: 60s in-memory cache per user; plenty for one lookup per script launch.
 const tierCache = new Map();
 app.get("/api/tier/:discordId", async (req, res) => {
@@ -34,6 +35,10 @@ app.get("/api/tier/:discordId", async (req, res) => {
   try {
     const key = await jnkie.keyFor(id);
     const body = { active: jnkie.active(key), tier: key ? jnkie.tierOf(key) : null };
+    if (body.active) {
+      const user = await client.users.fetch(id).catch(() => null);
+      if (user) Object.assign(body, { username: user.globalName || user.username, avatar: avatar(user) });
+    }
     tierCache.set(id, { at: Date.now(), body });
     res.json(body);
   } catch (e) {
