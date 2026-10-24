@@ -90,6 +90,10 @@ function applyStatus() {
   client.user.setPresence({ activities: [a], status: a.presence || "online" });
 }
 
+// Status channels are named like "...<dot>...Volt-Status": only the dot changes, never the rest of the name.
+const DOTS = { up: "\u{1F7E2}", issues: "\u{1F7E1}", down: "\u{1F534}" };
+const ANY_DOT = new RegExp(Object.values(DOTS).join("|"), "u"); // no /g: one dot per name, and test() stays stateless
+
 const staff = PermissionFlagsBits.ManageGuild;
 const cmds = [
   new SlashCommandBuilder().setName("panel").setDescription("Post the free-scripts panel").setDefaultMemberPermissions(staff),
@@ -112,6 +116,10 @@ const cmds = [
     .addChannelOption((o) => o.setName("channel").setDescription("Where to post (default: here)").addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement))
     .addStringOption((o) => o.setName("ping").setDescription("Who to ping").addChoices(
       { name: "none", value: "none" }, { name: "@everyone", value: "everyone" }, { name: "@here", value: "here" })),
+  new SlashCommandBuilder().setName("tracker").setDescription("Flip a status channel's dot green, yellow or red").setDefaultMemberPermissions(staff)
+    .addChannelOption((o) => o.setName("channel").setDescription("The status channel").setRequired(true))
+    .addStringOption((o) => o.setName("state").setDescription("New state").setRequired(true).addChoices(
+      { name: "Up (green)", value: "up" }, { name: "Issues (yellow)", value: "issues" }, { name: "Down (red)", value: "down" })),
   new SlashCommandBuilder().setName("status").setDescription("Change the bot's status").setDefaultMemberPermissions(staff)
     .addStringOption((o) => o.setName("type").setDescription("Activity").setRequired(true).addChoices(
       { name: "Playing", value: "playing" }, { name: "Watching", value: "watching" },
@@ -167,6 +175,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
             .setThumbnail(LOGO).setTimestamp();
           return post(interaction, e);
         }
+        case "tracker": {
+          const ch = o.getChannel("channel");
+          const dot = DOTS[o.getString("state")];
+          if (!ANY_DOT.test(ch.name)) {
+            return interaction.reply({ content: `${ch} has no dot in its name to change.`, ephemeral: true });
+          }
+          await interaction.deferReply({ ephemeral: true });
+          // Discord allows only 2 channel renames per 10 minutes, so a slow one is a rate limit, not a hang.
+          await ch.setName(ch.name.replace(ANY_DOT, dot));
+          return interaction.editReply(`${ch} is now ${dot}.`);
+        }
         case "status": {
           const type = o.getString("type");
           if (type === "reset") fixedStatus = null;
@@ -190,5 +209,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
 });
 
 app.listen(PORT, () => console.log(`[+] web on :${PORT}`));
+
+// Render's free tier sleeps a web service after ~15 idle minutes and takes the bot down with it, so the
+// service pings itself to stay awake.
+// ponytail: self-ping keeps it up 24/7 on the free plan; drop it if this ever moves to a paid plan.
+if (PUBLIC_URL) setInterval(() => fetch(PUBLIC_URL + "/health").catch(() => {}), 10 * 60_000);
 if (DISCORD_BOT_TOKEN) client.login(DISCORD_BOT_TOKEN).catch((e) => console.error("login:", e.message));
 else console.log("[!] no DISCORD_BOT_TOKEN — web only");
