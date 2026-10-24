@@ -70,9 +70,8 @@ function gamesEmbed() {
     .setTitle("Supported Games")
     .setThumbnail(LOGO)
     .addFields(
-      { name: "💎 Paid (key)", value: PAID.map(line).join("\n") || "—" },
-      { name: "🆓 Free", value: FREE.map(line).join("\n") || "—" },
-      { name: "Loadstring", value: "```lua\n" + UNIVERSAL + "\n```" },
+      { name: "Paid (key)", value: PAID.map(line).join("\n") || "-" },
+      { name: "Free", value: FREE.map(line).join("\n") || "-" },
     );
 }
 
