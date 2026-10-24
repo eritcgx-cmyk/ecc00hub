@@ -126,80 +126,168 @@ app.get("/api/profile", async (req, res) => {
 });
 
 // ---------------------------------------------------------------- discord bot
+const { ActivityType, ChannelType } = require("discord.js");
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const UNIVERSAL = `loadstring(game:HttpGet("${HUB_LOADER}"))()`;
+const FREE = GAMES.filter((g) => !g.paid);
+const PAID = GAMES.filter((g) => g.paid);
+const brand = (e) => e.setColor(EMBED).setAuthor({ name: "ECC00", iconURL: LOGO }).setFooter({ text: "eccohub.xyz", iconURL: LOGO });
 
-function panelMessage() {
+function buttonRows(games, prefix) {
   const rows = [];
   let row = new ActionRowBuilder();
-  for (const g of GAMES) {
+  for (const g of games) {
     if (row.components.length === 5) { rows.push(row); row = new ActionRowBuilder(); }
     row.addComponents(new ButtonBuilder()
-      .setCustomId(`game:${g.key}`)
+      .setCustomId(`${prefix}:${g.key}`)
       .setLabel(g.soon ? `${g.name} (soon)` : g.name)
       .setEmoji(g.emoji)
       .setStyle(g.soon ? ButtonStyle.Secondary : ButtonStyle.Primary)
       .setDisabled(Boolean(g.soon)));
   }
   if (row.components.length) rows.push(row);
-  const embed = new EmbedBuilder()
-    .setColor(EMBED)
-    .setAuthor({ name: "ECC00", iconURL: LOGO })
-    .setTitle("Free Scripts")
-    .setThumbnail(LOGO)
-    .setDescription("Pick a game. The bot DMs you a loadstring linked to your Discord — your name and avatar then show in the menu.")
-    .setFooter({ text: "eccohub.xyz", iconURL: LOGO });
-  return { embeds: [embed], components: rows };
+  return rows;
 }
 
-async function registerCommands() {
-  const rest = new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN);
-  await rest.put(Routes.applicationCommands(client.user.id), {
-    body: [
-      new SlashCommandBuilder().setName("panel").setDescription("Post the free-scripts panel")
-        .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild).toJSON(),
-      new SlashCommandBuilder().setName("getscript").setDescription("DM yourself your personalized loadstring").toJSON(),
-    ],
-  });
+function panelMessage() {
+  const embed = brand(new EmbedBuilder())
+    .setTitle("Free Scripts")
+    .setThumbnail(LOGO)
+    .setDescription("Pick a game to get the loadstring.\nOne loadstring works for every game — it loads the right script automatically.\n\n"
+      + `**Paid** (${PAID.map((g) => g.name).join(", ")}) need a key — ask staff.`);
+  return { embeds: [embed], components: buttonRows(FREE, "game") };
 }
+
+function gamesEmbed() {
+  const line = (g) => `${g.emoji} **${g.name}**${g.soon ? " — *soon*" : ""}`;
+  return brand(new EmbedBuilder())
+    .setTitle("Supported Games")
+    .setThumbnail(LOGO)
+    .addFields(
+      { name: "💎 Paid (key)", value: PAID.map(line).join("\n") || "—" },
+      { name: "🆓 Free", value: FREE.map(line).join("\n") || "—" },
+      { name: "Loadstring", value: "```lua\n" + UNIVERSAL + "\n```" },
+    );
+}
+
+// ---- status: set with /status, otherwise rotates through a few defaults.
+let fixedStatus = null;
+const ACT = { playing: ActivityType.Playing, watching: ActivityType.Watching, listening: ActivityType.Listening, competing: ActivityType.Competing };
+const ROTATE = [
+  () => ({ name: `${GAMES.filter((g) => !g.soon).length} games`, type: ActivityType.Watching }),
+  () => ({ name: "eccohub.xyz", type: ActivityType.Playing }),
+  () => ({ name: "/games", type: ActivityType.Listening }),
+];
+let rotI = 0;
+function applyStatus() {
+  if (!client.isReady()) return;
+  const a = fixedStatus || ROTATE[rotI++ % ROTATE.length]();
+  client.user.setPresence({ activities: [a], status: a.presence || "online" });
+}
+
+const staff = PermissionFlagsBits.ManageGuild;
+const cmds = [
+  new SlashCommandBuilder().setName("panel").setDescription("Post the free-scripts panel").setDefaultMemberPermissions(staff),
+  new SlashCommandBuilder().setName("games").setDescription("Show every supported game, free and paid"),
+  new SlashCommandBuilder().setName("getscript").setDescription("Get the ECC00 loadstring"),
+  new SlashCommandBuilder().setName("announce").setDescription("Post an announcement").setDefaultMemberPermissions(staff)
+    .addStringOption((o) => o.setName("title").setDescription("Title").setRequired(true))
+    .addStringOption((o) => o.setName("message").setDescription("Message (use \\n for new lines)").setRequired(true))
+    .addChannelOption((o) => o.setName("channel").setDescription("Where to post (default: here)").addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement))
+    .addStringOption((o) => o.setName("ping").setDescription("Who to ping").addChoices(
+      { name: "none", value: "none" }, { name: "@everyone", value: "everyone" }, { name: "@here", value: "here" }))
+    .addAttachmentOption((o) => o.setName("image").setDescription("Image")),
+  new SlashCommandBuilder().setName("update").setDescription("Post a script update log").setDefaultMemberPermissions(staff)
+    .addStringOption((o) => o.setName("game").setDescription("Game").setRequired(true)
+      .addChoices(...GAMES.map((g) => ({ name: g.name, value: g.key }))))
+    .addStringOption((o) => o.setName("changes").setDescription("Changes, separated by ; or \\n").setRequired(true))
+    .addStringOption((o) => o.setName("version").setDescription("Version, e.g. v1.4"))
+    .addChannelOption((o) => o.setName("channel").setDescription("Where to post (default: here)").addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement))
+    .addStringOption((o) => o.setName("ping").setDescription("Who to ping").addChoices(
+      { name: "none", value: "none" }, { name: "@everyone", value: "everyone" }, { name: "@here", value: "here" })),
+  new SlashCommandBuilder().setName("status").setDescription("Change the bot's status").setDefaultMemberPermissions(staff)
+    .addStringOption((o) => o.setName("type").setDescription("Activity").setRequired(true).addChoices(
+      { name: "Playing", value: "playing" }, { name: "Watching", value: "watching" },
+      { name: "Listening to", value: "listening" }, { name: "Competing in", value: "competing" },
+      { name: "Reset (rotate defaults)", value: "reset" }))
+    .addStringOption((o) => o.setName("text").setDescription("Status text"))
+    .addStringOption((o) => o.setName("presence").setDescription("Dot colour").addChoices(
+      { name: "Online", value: "online" }, { name: "Idle", value: "idle" }, { name: "Do not disturb", value: "dnd" })),
+].map((c) => c.toJSON());
 
 client.once(Events.ClientReady, async () => {
   console.log(`[+] ECC00 bot online as ${client.user.tag}`);
-  try { await registerCommands(); } catch (e) { console.error("command register:", e.message); }
+  try { await new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN).put(Routes.applicationCommands(client.user.id), { body: cmds }); }
+  catch (e) { console.error("command register:", e.message); }
+  applyStatus();
+  setInterval(applyStatus, 60_000);
 });
 
-async function dmLoadstring(interaction, game) {
+const PINGS = { everyone: "@everyone", here: "@here" };
+async function post(interaction, embed) {
+  const ch = interaction.options.getChannel("channel") || interaction.channel;
+  const ping = PINGS[interaction.options.getString("ping")];
+  await ch.send({ content: ping, embeds: [embed], allowedMentions: { parse: ping ? ["everyone"] : [] } });
+  return interaction.reply({ content: `Posted in ${ch}.`, ephemeral: true });
+}
+const lines = (s) => s.split(/\\n|\n|;/).map((x) => x.trim()).filter(Boolean);
+
+async function sendLoadstring(interaction, game) {
+  // Personal loadstring (shows their Discord in the menu) when the link store is configured, else the universal one.
   const u = interaction.user;
-  const token = await upsertLink(u.id, u.global_name || u.username, avatarUrl(u));
-  if (!token) return interaction.reply({ content: "Link store is offline, try again later.", ephemeral: true });
-  const where = game ? `\nJoin **${game.name}** and run it:` : "\nRun it in any supported game:";
-  const dm = new EmbedBuilder().setColor(EMBED).setAuthor({ name: "ECC00", iconURL: LOGO })
-    .setTitle(game ? game.name : "Your loadstring")
-    .setDescription(`${where}\n\`\`\`lua\n${loadstringFor(token)}\n\`\`\`\nIt carries your Discord profile into the menu.`)
-    .setFooter({ text: "eccohub.xyz", iconURL: LOGO });
-  try {
-    await u.send({ embeds: [dm] });
-    await interaction.reply({ content: "📬 Sent to your DMs.", ephemeral: true });
-  } catch {
-    await interaction.reply({ embeds: [dm], ephemeral: true }); // DMs closed → show ephemerally instead
-  }
+  const token = await upsertLink(u.id, u.global_name || u.username, avatarUrl(u)).catch(() => null);
+  const ls = token ? loadstringFor(token) : UNIVERSAL;
+  const e = brand(new EmbedBuilder()).setTitle(game ? `${game.emoji} ${game.name}` : "Your loadstring")
+    .setDescription(`${game ? `Join **${game.name}** and run:` : "Run in any supported game:"}\n\`\`\`lua\n${ls}\n\`\`\``);
+  return interaction.reply({ embeds: [e], ephemeral: true });
 }
 
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
     if (interaction.isChatInputCommand()) {
-      if (interaction.commandName === "panel") {
-        await interaction.channel.send(panelMessage());
-        return interaction.reply({ content: "Panel posted.", ephemeral: true });
+      const o = interaction.options;
+      switch (interaction.commandName) {
+        case "panel":
+          await interaction.channel.send(panelMessage());
+          return interaction.reply({ content: "Panel posted.", ephemeral: true });
+        case "games": return interaction.reply({ embeds: [gamesEmbed()] });
+        case "getscript": return sendLoadstring(interaction, null);
+        case "announce": {
+          const e = brand(new EmbedBuilder()).setTitle(o.getString("title"))
+            .setDescription(lines(o.getString("message")).join("\n")).setTimestamp();
+          const img = o.getAttachment("image");
+          if (img) e.setImage(img.url);
+          return post(interaction, e);
+        }
+        case "update": {
+          const g = GAMES.find((x) => x.key === o.getString("game"));
+          const v = o.getString("version");
+          const e = brand(new EmbedBuilder()).setTitle(`${g.emoji} ${g.name} updated${v ? ` — ${v}` : ""}`)
+            .setDescription(lines(o.getString("changes")).map((c) => `• ${c}`).join("\n"))
+            .addFields({ name: "Loadstring", value: "```lua\n" + UNIVERSAL + "\n```" })
+            .setThumbnail(LOGO).setTimestamp();
+          return post(interaction, e);
+        }
+        case "status": {
+          const type = o.getString("type");
+          if (type === "reset") fixedStatus = null;
+          else {
+            const text = o.getString("text");
+            if (!text) return interaction.reply({ content: "Give it some text.", ephemeral: true });
+            fixedStatus = { name: text, type: ACT[type], presence: o.getString("presence") || "online" };
+          }
+          applyStatus();
+          return interaction.reply({ content: fixedStatus ? `Status set: ${type} ${fixedStatus.name}` : "Status reset to rotation.", ephemeral: true });
+        }
       }
-      if (interaction.commandName === "getscript") return dmLoadstring(interaction, null);
     } else if (interaction.isButton() && interaction.customId.startsWith("game:")) {
       const game = GAMES.find((g) => g.key === interaction.customId.slice(5));
       if (!game || game.soon) return interaction.reply({ content: "That one isn't out yet.", ephemeral: true });
-      return dmLoadstring(interaction, game);
+      return sendLoadstring(interaction, game);
     }
   } catch (e) {
     console.error("interaction:", e.message);
-    if (interaction.isRepliable() && !interaction.replied) interaction.reply({ content: "Something broke, try again.", ephemeral: true }).catch(() => {});
+    if (interaction.isRepliable() && !interaction.replied) interaction.reply({ content: "Something broke: " + e.message, ephemeral: true }).catch(() => {});
   }
 });
 
