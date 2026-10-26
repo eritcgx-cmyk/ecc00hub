@@ -190,7 +190,7 @@ const cmds = [
     .addAttachmentOption((o) => o.setName("image").setDescription("Image")),
   new SlashCommandBuilder().setName("update").setDescription("Post an update or release log").setDefaultMemberPermissions(staff)
     .addStringOption((o) => o.setName("game").setDescription("Game, or the loader itself").setRequired(true)
-      .addChoices(...GAMES.map((g) => ({ name: g.name, value: g.key })), { name: "Loader", value: "loader" }))
+      .addChoices(...GAMES.map((g) => ({ name: g.name, value: g.key })), { name: "ECC00 Private", value: "private" }, { name: "Loader", value: "loader" }))
     .addStringOption((o) => o.setName("changes").setDescription("Changes, separated by ; or \\n").setRequired(true))
     .addStringOption((o) => o.setName("type").setDescription("Update (default) or a new release")
       .addChoices({ name: "Update", value: "update" }, { name: "Release", value: "release" }))
@@ -284,13 +284,12 @@ async function onCommand(i) {
     case "update": {
       const key = o.getString("game");
       const game = GAMES.find((g) => g.key === key);
-      const name = game ? game.name : "Loader";
+      const name = game ? game.name : key === "private" ? "ECC00 Private" : "Loader";
       const v = o.getString("version");
       const verb = o.getString("type") === "release" ? "released" : "updated";
       const e = brand(new EmbedBuilder()).setTitle(`${name} ${verb}${v ? ` ${v}` : ""}`)
         .setDescription(lines(o.getString("changes")).map((c) => `- ${c}`).join("\n"))
         .setThumbnail(LOGO).setTimestamp();
-      if (!game?.paid) e.addFields({ name: "Loadstring", value: lua(UNIVERSAL) }); // paid users get theirs from the panel
       return post(i, e);
     }
 
