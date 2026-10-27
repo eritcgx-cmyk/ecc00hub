@@ -219,6 +219,8 @@ const buildCmds = () => [
     .addStringOption((o) => o.setName("game").setDescription("Game, or the loader itself").setRequired(true)
       .addChoices(...gameChoices(), { name: "ECC00 Private", value: "private" }, { name: "Loader", value: "loader" }))
     .addStringOption((o) => o.setName("changes").setDescription("Changes, separated by ; or \\n").setRequired(true))
+    .addStringOption((o) => o.setName("fixes").setDescription("Bug fixes, separated by ; or \\n"))
+    .addStringOption((o) => o.setName("private").setDescription("ECC00 Private-only features, separated by ; or \\n"))
     .addStringOption((o) => o.setName("type").setDescription("Update (default) or a new release")
       .addChoices({ name: "Update", value: "update" }, { name: "Release", value: "release" }))
     .addStringOption((o) => o.setName("version").setDescription("Version, e.g. v1.4"))
@@ -364,6 +366,12 @@ async function onCommand(i) {
       const e = brand(new EmbedBuilder()).setTitle(`${name} ${verb}${v ? ` ${v}` : ""}`)
         .setDescription(lines(o.getString("changes")).map((c) => `- ${c}`).join("\n"))
         .setThumbnail(LOGO).setTimestamp();
+      const section = (title, opt) => {
+        const v = o.getString(opt);
+        if (v) e.addFields({ name: title, value: lines(v).map((c) => `- ${c}`).join("\n").slice(0, 1024) });
+      };
+      section("Fixes", "fixes");
+      section("ECC00 Private", "private");
       return post(i, e);
     }
 
