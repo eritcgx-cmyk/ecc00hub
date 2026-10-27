@@ -8,7 +8,9 @@ const {
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
   REST, Routes, SlashCommandBuilder, PermissionFlagsBits,
 } = require("discord.js");
-const GAMES = require("./games");
+const BASE_GAMES = require("./games");
+const store = require("./store");
+const allGames = () => [...BASE_GAMES.filter((g) => !store.data.removed.includes(g.key)), ...store.data.games];
 const jnkie = require("./jnkie");
 const tracker = require("./tracker");
 
@@ -67,6 +69,8 @@ app.get("/api/key/:key", async (req, res) => {
     res.status(502).json({ error: e.message });
   }
 });
+// Free (universal loader) scripts ask this on load: has staff made this script's premium features free?
+app.get("/api/free/:script", (req, res) => res.json({ free: Boolean(store.data.freePremium[req.params.script]) }));
 app.get("/health/jnkie", (_req, res) => jnkie.ping()
   .then((services) => res.json({ ok: true, services }))
   .catch((e) => res.status(502).json({ ok: false, error: e.message })));
@@ -74,8 +78,8 @@ app.get("/health/jnkie", (_req, res) => jnkie.ping()
 // ---------------------------------------------------------------- shared bits
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 const UNIVERSAL = `loadstring(game:HttpGet("${HUB_LOADER}"))()`;
-const FREE = GAMES.filter((g) => !g.paid && !g.soon);
-const PAID = GAMES.filter((g) => g.paid);
+const freeGames = () => allGames().filter((g) => !g.paid && !g.soon);
+const paidGames = () => allGames().filter((g) => g.paid);
 const TIERS = ["user", "premium", "dev", "staff", "owner"];
 const brand = (e) => e.setColor(EMBED).setAuthor({ name: "ECC00", iconURL: LOGO }).setFooter({ text: "eccohub.xyz", iconURL: LOGO });
 const avatar = (u) => u.displayAvatarURL({ extension: "png", size: 128 });
@@ -166,7 +170,7 @@ async function syncRole(guild, userId, tier) {
 let fixedStatus = null;
 const ACT = { playing: ActivityType.Playing, watching: ActivityType.Watching, listening: ActivityType.Listening, competing: ActivityType.Competing };
 const ROTATE = [
-  () => ({ name: `${GAMES.filter((g) => !g.soon).length} games`, type: ActivityType.Watching }),
+  () => ({ name: `${allGames().filter((g) => !g.soon).length} games`, type: ActivityType.Watching }),
   () => ({ name: "eccohub.xyz", type: ActivityType.Playing }),
   () => ({ name: tracker.latest.roblox ? `Roblox ${tracker.latest.roblox.replace("version-", "").slice(0, 8)}` : "Roblox updates", type: ActivityType.Watching }),
 ];
@@ -183,7 +187,8 @@ const pingOpt = (o) => o.setName("ping").setDescription("Who to ping").addChoice
   { name: "none", value: "none" }, { name: "@everyone", value: "everyone" }, { name: "@here", value: "here" });
 const chanOpt = (o) => o.setName("channel").setDescription("Where to post (default: here)").addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement);
 
-const cmds = [
+const gameChoices = () => allGames().slice(0, 22).map((g) => ({ name: g.name, value: g.key })); // Discord caps choices at 25
+const buildCmds = () => [
   new SlashCommandBuilder().setName("panel").setDescription("Post a panel").setDefaultMemberPermissions(staff)
     .addStringOption((o) => o.setName("type").setDescription("Which panel").setRequired(true)
       .addChoices({ name: "Free", value: "free" }, { name: "Paid", value: "paid" })),
@@ -212,7 +217,7 @@ const cmds = [
     .addAttachmentOption((o) => o.setName("image").setDescription("Image")),
   new SlashCommandBuilder().setName("update").setDescription("Post an update or release log").setDefaultMemberPermissions(staff)
     .addStringOption((o) => o.setName("game").setDescription("Game, or the loader itself").setRequired(true)
-      .addChoices(...GAMES.map((g) => ({ name: g.name, value: g.key })), { name: "ECC00 Private", value: "private" }, { name: "Loader", value: "loader" }))
+      .addChoices(...gameChoices(), { name: "ECC00 Private", value: "private" }, { name: "Loader", value: "loader" }))
     .addStringOption((o) => o.setName("changes").setDescription("Changes, separated by ; or \\n").setRequired(true))
     .addStringOption((o) => o.setName("type").setDescription("Update (default) or a new release")
       .addChoices({ name: "Update", value: "update" }, { name: "Release", value: "release" }))
@@ -236,6 +241,17 @@ const cmds = [
     .addStringOption((o) => o.setName("text").setDescription("Status text"))
     .addStringOption((o) => o.setName("presence").setDescription("Dot colour").addChoices(
       { name: "Online", value: "online" }, { name: "Idle", value: "idle" }, { name: "Do not disturb", value: "dnd" })),
+  new SlashCommandBuilder().setName("addgame").setDescription("Add a game to the games list and /update").setDefaultMemberPermissions(staff)
+    .addStringOption((o) => o.setName("name").setDescription("Game name as players know it").setRequired(true))
+    .addStringOption((o) => o.setName("type").setDescription("Free (universal loader) or paid (key)").setRequired(true)
+      .addChoices({ name: "Free", value: "free" }, { name: "Paid", value: "paid" })),
+  new SlashCommandBuilder().setName("removegame").setDescription("Remove a game from the games list").setDefaultMemberPermissions(staff)
+    .addStringOption((o) => o.setName("game").setDescription("Game").setRequired(true).addChoices(...gameChoices())),
+  new SlashCommandBuilder().setName("freepremium").setDescription("Unlock a free script's premium features for everyone").setDefaultMemberPermissions(staff)
+    .addStringOption((o) => o.setName("script").setDescription("Universal-loader script (JNKIE scripts aren't affected)").setRequired(true)
+      .addChoices(...freeGames().slice(0, 25).map((g) => ({ name: g.name, value: g.key }))))
+    .addStringOption((o) => o.setName("state").setDescription("On = premium free for everyone").setRequired(true)
+      .addChoices({ name: "On", value: "on" }, { name: "Off", value: "off" })),
 ].map((c) => c.toJSON());
 
 const PINGS = { everyone: "@everyone", here: "@here" };
@@ -247,16 +263,52 @@ async function post(i, embed) {
 }
 const lines = (s) => s.split(/\\n|\n|;/).map((x) => x.trim()).filter(Boolean);
 
+async function registerCommands() {
+  try { await new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN).put(Routes.applicationCommands(client.user.id), { body: buildCmds().map((c) => c.toJSON()) }); }
+  catch (e) { console.error("command register:", e.message); }
+}
+const slug = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 24) || "game";
+
 async function onCommand(i) {
   const o = i.options;
   switch (i.commandName) {
+    case "addgame": {
+      const name = o.getString("name").trim();
+      const key = slug(name);
+      if (allGames().some((g) => g.key === key)) return reply(i, { content: `**${name}** is already on the list.` });
+      await i.deferReply({ ephemeral: true });
+      store.data.removed = store.data.removed.filter((k) => k !== key); // re-adding a removed built-in brings it back
+      if (!BASE_GAMES.some((g) => g.key === key)) store.data.games.push({ key, name, paid: o.getString("type") === "paid" });
+      await store.save();
+      await registerCommands();
+      return i.editReply(`Added **${name}** (${o.getString("type")}). It's in /games and /update now.`);
+    }
+    case "removegame": {
+      const key = o.getString("game");
+      const game = allGames().find((g) => g.key === key);
+      if (!game) return reply(i, { content: "That game isn't on the list." });
+      await i.deferReply({ ephemeral: true });
+      store.data.games = store.data.games.filter((g) => g.key !== key);
+      if (BASE_GAMES.some((g) => g.key === key)) store.data.removed.push(key);
+      await store.save();
+      await registerCommands();
+      return i.editReply(`Removed **${game.name}**.`);
+    }
+    case "freepremium": {
+      const key = o.getString("script");
+      const on = o.getString("state") === "on";
+      if (on) store.data.freePremium[key] = true; else delete store.data.freePremium[key];
+      await store.save();
+      const game = allGames().find((g) => g.key === key);
+      return reply(i, { content: `Premium in **${game ? game.name : key}** is now ${on ? "free for everyone" : "key-only again"}. Takes effect next time the script loads.` });
+    }
     case "panel":
       await i.channel.send(o.getString("type") === "paid" ? paidPanel() : freePanel());
       return reply(i, { content: "Panel posted." });
 
     case "games":
       return i.reply({ embeds: [brand(new EmbedBuilder()).setTitle("Supported Games").setThumbnail(LOGO)
-        .addFields({ name: "Paid", value: list(PAID) }, { name: "Free", value: list(FREE) })] });
+        .addFields({ name: "Paid", value: list(paidGames()) }, { name: "Free", value: list(freeGames()) })] });
 
     case "whitelist": {
       await i.deferReply({ ephemeral: true });
@@ -305,7 +357,7 @@ async function onCommand(i) {
 
     case "update": {
       const key = o.getString("game");
-      const game = GAMES.find((g) => g.key === key);
+      const game = allGames().find((g) => g.key === key);
       const name = game ? game.name : key === "private" ? "ECC00 Private" : "Loader";
       const v = o.getString("version");
       const verb = o.getString("type") === "release" ? "released" : "updated";
@@ -368,8 +420,8 @@ client.on(Events.InteractionCreate, async (i) => {
 
 client.once(Events.ClientReady, async () => {
   console.log(`[+] ECC00 bot online as ${client.user.tag}`);
-  try { await new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN).put(Routes.applicationCommands(client.user.id), { body: cmds }); }
-  catch (e) { console.error("command register:", e.message); }
+  try { await store.load(client); } catch (e) { console.error("store load:", e.message); }
+  await registerCommands();
   applyStatus();
   setInterval(applyStatus, 60_000);
   tracker.start(client, brand);
