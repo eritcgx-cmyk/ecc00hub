@@ -264,7 +264,7 @@ async function post(i, embed) {
 const lines = (s) => s.split(/\\n|\n|;/).map((x) => x.trim()).filter(Boolean);
 
 async function registerCommands() {
-  try { await new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN).put(Routes.applicationCommands(client.user.id), { body: buildCmds().map((c) => c.toJSON()) }); }
+  try { await new REST({ version: "10" }).setToken(DISCORD_BOT_TOKEN).put(Routes.applicationCommands(client.user.id), { body: buildCmds() }); }
   catch (e) { console.error("command register:", e.message); }
 }
 const slug = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 24) || "game";
