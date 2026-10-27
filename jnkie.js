@@ -31,6 +31,12 @@ async function keyFor(discordId) {
   return keys.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] || null;
 }
 
+// The key a script was run with (getgenv().SCRIPT_KEY), or null.
+async function keyByValue(value) {
+  const { keys = [] } = await api("GET", `/keys?key=${encodeURIComponent(value)}&limit=1`);
+  return keys.find((k) => k.key_value === value) || null;
+}
+
 // Add or renew. Reuses the existing key so the user's saved loadstring keeps working.
 async function whitelist(discordId, tier, minutes) {
   const existing = await keyFor(discordId);
@@ -77,4 +83,4 @@ async function unblacklist(key) {
 // Cheap authenticated call, so a bad key shows up as an error instead of "configured".
 const ping = () => api("GET", "/services").then((d) => (d.services || d).length);
 
-module.exports = { ready, ping, keyFor, whitelist, unwhitelist, resetHwid, blacklist, unblacklist, tierOf, active, expired, hwidsOf };
+module.exports = { ready, ping, keyFor, keyByValue, whitelist, unwhitelist, resetHwid, blacklist, unblacklist, tierOf, active, expired, hwidsOf };

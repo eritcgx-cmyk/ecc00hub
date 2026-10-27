@@ -45,6 +45,28 @@ app.get("/api/tier/:discordId", async (req, res) => {
     res.status(502).json({ error: e.message });
   }
 });
+// Free scripts (MM2...) ask this with the key the user ran them with, to unlock premium options and show the
+// Discord profile on that key. Answers only for a valid key, and never echoes the key back.
+const keyCache = new Map();
+app.get("/api/key/:key", async (req, res) => {
+  const value = req.params.key;
+  if (!/^[\w-]{8,100}$/.test(value)) return res.status(400).json({ error: "bad key" });
+  const hit = keyCache.get(value);
+  if (hit && Date.now() - hit.at < 60_000) return res.json(hit.body);
+  try {
+    const key = await jnkie.keyByValue(value);
+    const body = { active: jnkie.active(key), tier: key ? jnkie.tierOf(key) : null };
+    if (body.active && key.discord_id) {
+      body.discordId = key.discord_id;
+      const user = await client.users.fetch(key.discord_id).catch(() => null);
+      if (user) Object.assign(body, { username: user.globalName || user.username, avatar: avatar(user) });
+    }
+    keyCache.set(value, { at: Date.now(), body });
+    res.json(body);
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
 app.get("/health/jnkie", (_req, res) => jnkie.ping()
   .then((services) => res.json({ ok: true, services }))
   .catch((e) => res.status(502).json({ ok: false, error: e.message })));
