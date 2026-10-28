@@ -88,7 +88,7 @@ app.post("/api/exec", express.json({ limit: "2kb" }), async (req, res) => {
   const place = Number(b.place) || 0;
   const ch = client.channels.cache.get(store.data.logChannel);
   if (!ch) return;
-  ch.send({ allowedMentions: { parse: [] }, embeds: [brand(new EmbedBuilder()).setTitle("Script Executed").setTimestamp().addFields(
+  ch.send({ content: store.data.logPing || undefined, allowedMentions: { parse: ["users", "roles"] }, embeds: [brand(new EmbedBuilder()).setTitle("Script Executed").setTimestamp().addFields(
     { name: "Script", value: s(b.script), inline: true },
     { name: "Executor", value: s(b.executor), inline: true },
     { name: "Key", value: b.keyed ? "Yes" : "No", inline: true },
@@ -263,7 +263,8 @@ const buildCmds = () => [
   new SlashCommandBuilder().setName("ticket").setDescription("Post the support ticket panel").setDefaultMemberPermissions(staff)
     .addChannelOption(chanOpt),
   new SlashCommandBuilder().setName("logs").setDescription("Set where script execution logs go").setDefaultMemberPermissions(staff)
-    .addChannelOption((o) => o.setName("channel").setDescription("Log channel (leave empty to turn logs off)").addChannelTypes(ChannelType.GuildText)),
+    .addChannelOption((o) => o.setName("channel").setDescription("Log channel (leave empty to turn logs off)").addChannelTypes(ChannelType.GuildText))
+    .addMentionableOption((o) => o.setName("ping").setDescription("Who gets pinged on each execution (you, or a role)")),
   new SlashCommandBuilder().setName("tracker").setDescription("Status channels").setDefaultMemberPermissions(staff)
     .addSubcommand((s) => s.setName("link").setDescription("Auto-update a channel from WhatExpsAre.Online")
       .addChannelOption((o) => o.setName("channel").setDescription("Status channel").setRequired(true).addChannelTypes(ChannelType.GuildText))
@@ -439,9 +440,11 @@ async function onCommand(i) {
 
     case "logs": {
       const ch = o.getChannel("channel");
+      const who = o.getMentionable("ping");
       store.data.logChannel = ch ? ch.id : null;
+      store.data.logPing = who ? (who.permissions !== undefined && !who.user ? `<@&${who.id}>` : `<@${who.id}>`) : null;
       await store.save();
-      return reply(i, { content: ch ? `Execution logs now go to ${ch}.` : "Execution logs turned off." });
+      return reply(i, { content: ch ? `Execution logs now go to ${ch}${store.data.logPing ? `, pinging ${store.data.logPing}` : ""}.` : "Execution logs turned off." });
     }
 
     case "tracker": {
