@@ -4,6 +4,7 @@ module.exports = [
   { key: "dahood",   name: "Da Hood",          paid: true, place: 2788229376 },
   { key: "hoodc",    name: "Hood Customs",     paid: true, place: 9825515356 },
   { key: "mm2",      name: "Murder Mystery 2" },
+  { key: "ftf",      name: "Flee the Facility", place: 893973440 },
   { key: "amber",    name: "Amber Alert" },
   { key: "verity",   name: "Survive Verity (Area 51)", place: 74716719697996 },
 ];
