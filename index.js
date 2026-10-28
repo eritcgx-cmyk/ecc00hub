@@ -71,6 +71,31 @@ app.get("/api/key/:key", async (req, res) => {
 });
 // Free (universal loader) scripts ask this on load: has staff made this script's premium features free?
 app.get("/api/free/:script", (req, res) => res.json({ free: Boolean(store.data.freePremium[req.params.script]) }));
+// The loader reports each launch here; it lands in the channel set with /logs. Anyone can call this, so it is
+// size-capped and rate-limited (one log per Roblox user per 30s, 30 a minute overall) and never pings anyone.
+const lastExec = new Map();
+let execWindow = { start: 0, count: 0 };
+app.post("/api/exec", express.json({ limit: "2kb" }), async (req, res) => {
+  res.json({ ok: true });
+  const b = req.body || {};
+  const userId = Number(b.userId) || 0;
+  const now = Date.now();
+  if (!store.data.logChannel || !userId || now - (lastExec.get(userId) || 0) < 30_000) return;
+  if (now - execWindow.start > 60_000) execWindow = { start: now, count: 0 };
+  if (++execWindow.count > 30) return;
+  lastExec.set(userId, now);
+  const s = (v, n = 60) => String(v ?? "?").replace(/[`@]/g, "").slice(0, n) || "?";
+  const place = Number(b.place) || 0;
+  const ch = client.channels.cache.get(store.data.logChannel);
+  if (!ch) return;
+  ch.send({ allowedMentions: { parse: [] }, embeds: [brand(new EmbedBuilder()).setTitle("Script Executed").setTimestamp().addFields(
+    { name: "Script", value: s(b.script), inline: true },
+    { name: "Executor", value: s(b.executor), inline: true },
+    { name: "Key", value: b.keyed ? "Yes" : "No", inline: true },
+    { name: "Game", value: place ? `[${s(b.game, 80)}](https://www.roblox.com/games/${place})` : s(b.game, 80) },
+    { name: "User", value: `[${s(b.user, 40)}](https://www.roblox.com/users/${userId}/profile)` },
+  )] }).catch(() => {});
+});
 app.get("/health/jnkie", (_req, res) => jnkie.ping()
   .then((services) => res.json({ ok: true, services }))
   .catch((e) => res.status(502).json({ ok: false, error: e.message })));
@@ -107,7 +132,7 @@ function freePanel() {
 
 function paidPanel() {
   return {
-    embeds: [brand(new EmbedBuilder()).setTitle("ECC00 Premium").setThumbnail(LOGO)
+    embeds: [brand(new EmbedBuilder()).setTitle("ECC00 Private").setThumbnail(LOGO)
       .setDescription("For whitelisted members. Your key is tied to your Discord account.")],
     components: [new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId("paid:script").setLabel("Get Script").setStyle(ButtonStyle.Primary),
@@ -218,13 +243,27 @@ const buildCmds = () => [
   new SlashCommandBuilder().setName("update").setDescription("Post an update or release log").setDefaultMemberPermissions(staff)
     .addStringOption((o) => o.setName("game").setDescription("Game, or the loader itself").setRequired(true)
       .addChoices(...gameChoices(), { name: "ECC00 Private", value: "private" }, { name: "Loader", value: "loader" }))
-    .addStringOption((o) => o.setName("changes").setDescription("Changes, separated by ; or \\n").setRequired(true))
-    .addStringOption((o) => o.setName("fixes").setDescription("Bug fixes, separated by ; or \\n"))
-    .addStringOption((o) => o.setName("private").setDescription("ECC00 Private-only features, separated by ; or \\n"))
+    .addStringOption((o) => o.setName("version").setDescription("New version, e.g. 2.6.0").setRequired(true))
     .addStringOption((o) => o.setName("type").setDescription("Update (default) or a new release")
       .addChoices({ name: "Update", value: "update" }, { name: "Release", value: "release" }))
-    .addStringOption((o) => o.setName("version").setDescription("Version, e.g. v1.4"))
+    .addStringOption((o) => o.setName("added").setDescription("[+] Added, separated by ; or \\n"))
+    .addStringOption((o) => o.setName("improved").setDescription("[*] Improved, separated by ; or \\n"))
+    .addStringOption((o) => o.setName("fixed").setDescription("[!] Fixed, separated by ; or \\n"))
+    .addStringOption((o) => o.setName("removed").setDescription("[-] Removed, separated by ; or \\n"))
+    .addStringOption((o) => o.setName("private").setDescription("ECC00 Private-only additions, separated by ; or \\n"))
     .addChannelOption(chanOpt).addStringOption(pingOpt),
+  new SlashCommandBuilder().setName("embed").setDescription("Build and post a custom embed").setDefaultMemberPermissions(staff)
+    .addStringOption((o) => o.setName("description").setDescription("Text (use \\n for new lines)").setRequired(true))
+    .addStringOption((o) => o.setName("title").setDescription("Title"))
+    .addStringOption((o) => o.setName("color").setDescription("Hex colour, e.g. #ff2d55"))
+    .addAttachmentOption((o) => o.setName("image").setDescription("Big image"))
+    .addAttachmentOption((o) => o.setName("thumbnail").setDescription("Small corner image"))
+    .addStringOption((o) => o.setName("footer").setDescription("Footer text"))
+    .addChannelOption(chanOpt).addStringOption(pingOpt),
+  new SlashCommandBuilder().setName("ticket").setDescription("Post the support ticket panel").setDefaultMemberPermissions(staff)
+    .addChannelOption(chanOpt),
+  new SlashCommandBuilder().setName("logs").setDescription("Set where script execution logs go").setDefaultMemberPermissions(staff)
+    .addChannelOption((o) => o.setName("channel").setDescription("Log channel (leave empty to turn logs off)").addChannelTypes(ChannelType.GuildText)),
   new SlashCommandBuilder().setName("tracker").setDescription("Status channels").setDefaultMemberPermissions(staff)
     .addSubcommand((s) => s.setName("link").setDescription("Auto-update a channel from WhatExpsAre.Online")
       .addChannelOption((o) => o.setName("channel").setDescription("Status channel").setRequired(true).addChannelTypes(ChannelType.GuildText))
@@ -361,18 +400,48 @@ async function onCommand(i) {
       const key = o.getString("game");
       const game = allGames().find((g) => g.key === key);
       const name = game ? game.name : key === "private" ? "ECC00 Private" : "Loader";
-      const v = o.getString("version");
-      const verb = o.getString("type") === "release" ? "released" : "updated";
-      const e = brand(new EmbedBuilder()).setTitle(`${name} ${verb}${v ? ` ${v}` : ""}`)
-        .setDescription(lines(o.getString("changes")).map((c) => `- ${c}`).join("\n"))
-        .setThumbnail(LOGO).setTimestamp();
-      const section = (title, opt) => {
-        const v = o.getString(opt);
-        if (v) e.addFields({ name: title, value: lines(v).map((c) => `- ${c}`).join("\n").slice(0, 1024) });
-      };
-      section("Fixes", "fixes");
-      section("ECC00 Private", "private");
+      const v = o.getString("version").trim();
+      const rowsOf = (opt, mark) => lines(o.getString(opt) || "").map((t) => [mark, t]);
+      const rows = [...rowsOf("added", "+"), ...rowsOf("improved", "*"), ...rowsOf("fixed", "!"), ...rowsOf("removed", "-")];
+      const priv = rowsOf("private", "+");
+      if (!rows.length && !priv.length) return reply(i, { content: "Add at least one change (added, improved, fixed, removed or private)." });
+      const roblox = tracker.latest.roblox || (await tracker.robloxVersion().catch(() => null))?.Windows;
+      const e = tracker.releaseEmbed(brand, {
+        title: `${name} ${o.getString("type") === "release" ? "Release" : "Update"}`,
+        from: store.data.versions[key], to: v, roblox, rows, extra: [["ECC00 Private", priv]],
+      }).setThumbnail(LOGO);
+      store.data.versions[key] = v; // next /update for this game shows "this -> new"
+      store.save().catch(() => {});
       return post(i, e);
+    }
+
+    case "embed": {
+      const e = brand(new EmbedBuilder()).setDescription(lines(o.getString("description")).join("\n"));
+      const hex = (o.getString("color") || "").replace("#", "");
+      if (/^[0-9a-f]{6}$/i.test(hex)) e.setColor(parseInt(hex, 16));
+      if (o.getString("title")) e.setTitle(o.getString("title"));
+      if (o.getAttachment("image")) e.setImage(o.getAttachment("image").url);
+      if (o.getAttachment("thumbnail")) e.setThumbnail(o.getAttachment("thumbnail").url);
+      if (o.getString("footer")) e.setFooter({ text: o.getString("footer"), iconURL: LOGO });
+      return post(i, e);
+    }
+
+    case "ticket": {
+      const ch = o.getChannel("channel") || i.channel;
+      await ch.send({
+        embeds: [brand(new EmbedBuilder()).setTitle("Support").setThumbnail(LOGO)
+          .setDescription("Need help with a script, your key or a purchase? Open a ticket and staff will reply in a private channel.")],
+        components: [new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId("ticket:open").setLabel("Open Ticket").setStyle(ButtonStyle.Primary))],
+      });
+      return reply(i, { content: `Ticket panel posted in ${ch}.` });
+    }
+
+    case "logs": {
+      const ch = o.getChannel("channel");
+      store.data.logChannel = ch ? ch.id : null;
+      await store.save();
+      return reply(i, { content: ch ? `Execution logs now go to ${ch}.` : "Execution logs turned off." });
     }
 
     case "tracker": {
@@ -386,7 +455,7 @@ async function onCommand(i) {
       }
       await i.deferReply({ ephemeral: true });
       if (sub === "unlink") {
-        await ch.setTopic((ch.topic || "").replace(/weao:\S+(\s+version-\S+)?/i, "").trim());
+        await ch.setTopic((ch.topic || "").replace(/weao:\S+(\s+\S+)?/i, "").trim());
         return i.editReply(`${ch} is no longer tracked.`);
       }
       const source = o.getString("source").trim();
@@ -416,10 +485,50 @@ async function onCommand(i) {
   }
 }
 
+// ---------------------------------------------------------------- tickets
+// One private channel per member under a "Tickets" category. The member and every role that can manage the
+// server see it; the channel topic remembers whose ticket it is, so nothing is stored.
+async function ticketButton(i, action) {
+  const guild = i.guild;
+  if (action === "close") {
+    if (!(i.channel.topic || "").startsWith("ticket:")) return reply(i, { content: "This isn't a ticket." });
+    await i.reply({ content: "Closing in 5 seconds." });
+    return setTimeout(() => i.channel.delete().catch(() => {}), 5000);
+  }
+  await i.deferReply({ ephemeral: true });
+  const open = guild.channels.cache.find((c) => c.topic === `ticket:${i.user.id}`);
+  if (open) return i.editReply(`You already have a ticket: ${open}`);
+  let cat = guild.channels.cache.find((c) => c.type === ChannelType.GuildCategory && c.name === "Tickets");
+  if (!cat) {
+    cat = await guild.channels.create({ name: "Tickets", type: ChannelType.GuildCategory,
+      permissionOverwrites: [{ id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] }] });
+  }
+  const see = [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles];
+  const staffRoles = guild.roles.cache.filter((r) => r.id !== guild.roles.everyone.id && r.permissions.has(PermissionFlagsBits.ManageGuild));
+  const ch = await guild.channels.create({
+    name: `ticket-${i.user.username}`.slice(0, 90), type: ChannelType.GuildText, parent: cat.id, topic: `ticket:${i.user.id}`,
+    permissionOverwrites: [
+      { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+      { id: i.user.id, allow: see },
+      { id: client.user.id, allow: [...see, PermissionFlagsBits.ManageChannels] },
+      ...staffRoles.map((r) => ({ id: r.id, allow: see })),
+    ],
+  });
+  await ch.send({
+    content: `${i.user}`,
+    embeds: [brand(new EmbedBuilder()).setTitle("Ticket opened")
+      .setDescription("Tell us what you need and staff will be with you soon. Press Close when you're done.")],
+    components: [new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("ticket:close").setLabel("Close").setStyle(ButtonStyle.Danger))],
+  });
+  return i.editReply(`Ticket opened: ${ch}`);
+}
+
 client.on(Events.InteractionCreate, async (i) => {
   try {
     if (i.isChatInputCommand()) return await onCommand(i);
     if (i.isButton() && i.customId.startsWith("paid:")) return await paidButton(i, i.customId.slice(5));
+    if (i.isButton() && i.customId.startsWith("ticket:")) return await ticketButton(i, i.customId.slice(7));
   } catch (e) {
     console.error("interaction:", e.message);
     if (i.isRepliable()) reply(i, { content: "Something broke: " + e.message }).catch(() => {});
