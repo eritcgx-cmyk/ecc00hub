@@ -406,10 +406,9 @@ async function onCommand(i) {
       const rows = [...rowsOf("added", "+"), ...rowsOf("improved", "*"), ...rowsOf("fixed", "!"), ...rowsOf("removed", "-")];
       const priv = rowsOf("private", "+");
       if (!rows.length && !priv.length) return reply(i, { content: "Add at least one change (added, improved, fixed, removed or private)." });
-      const roblox = tracker.latest.roblox || (await tracker.robloxVersion().catch(() => null))?.Windows;
       const e = tracker.releaseEmbed(brand, {
         title: `${name} ${o.getString("type") === "release" ? "Release" : "Update"}`,
-        from: store.data.versions[key], to: v, roblox, rows, extra: [["ECC00 Private", priv]],
+        from: store.data.versions[key], to: v, rows, extra: [["ECC00 Private", priv]],
       }).setThumbnail(LOGO);
       store.data.versions[key] = v; // next /update for this game shows "this -> new"
       store.save().catch(() => {});
