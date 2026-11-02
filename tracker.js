@@ -44,6 +44,56 @@ function releaseEmbed(brand, { title, from, to, roblox, at = Date.now(), rows, e
   return e;
 }
 
+// ---------------------------------------------------------------- executor changes
+// WEAO has no changelogs, so an "update" post lists exactly which of these moved since the last check.
+// ponytail: snapshots live in memory; a bot restart skips one round of diffs instead of re-posting everything
+const snaps = new Map();
+const snapOf = (e) => ({ version: e.version, rbx: e.rbxversion, ok: e.updateStatus, sunc: e.suncPercentage, unc: e.uncPercentage, detected: e.detected, issues: e.hasIssues });
+function diffRows(p, e) {
+  const n = snapOf(e), rows = [];
+  if (n.version !== p.version) rows.push(["+", `Version ${p.version || "?"} -> ${n.version}`]);
+  if (n.rbx !== p.rbx) rows.push(["+", `Now built for ${n.rbx || "a new Roblox version"}`]);
+  if (n.ok !== p.ok) rows.push(n.ok ? ["*", "Working on the current Roblox again"] : ["!", "Not working on the current Roblox (needs an update)"]);
+  if (n.sunc !== p.sunc && n.sunc != null) rows.push([n.sunc > (p.sunc || 0) ? "*" : "-", `sUNC ${p.sunc ?? "?"}% -> ${n.sunc}%`]);
+  if (n.unc !== p.unc && n.unc != null) rows.push([n.unc > (p.unc || 0) ? "*" : "-", `UNC ${p.unc ?? "?"}% -> ${n.unc}%`]);
+  if (n.detected !== p.detected) rows.push(n.detected ? ["!", "Now flagged as detected"] : ["*", "No longer detected"]);
+  if (n.issues !== p.issues) rows.push(n.issues ? ["!", "Has reported issues"] : ["*", "Reported issues fixed"]);
+  return rows;
+}
+// WEAO keeps per-executor changelogs (markdown) for executors whose own API publishes them.
+// "## New/Improved/Fixed/Removed" sections become [+]/[*]/[!]/[-]; "### Title" and "- item" lines become rows.
+const SECTION = [[/fix|bug/i, "!"], [/improv|chang|updat/i, "*"], [/remov|delet/i, "-"], [/./, "+"]];
+function parseChangelog(md) {
+  const rows = [];
+  let mark = "+";
+  for (const raw of String(md).split(/\r?\n/)) {
+    const line = raw.replace(/\u001b\[[0-9;]*m/g, "").trim(); // some changelogs come ANSI-coloured
+    if (!line) continue;
+    const tagged = line.match(/^\[([+*!-])\]\s*(.+)/); // "[+] Added x" style (Isaeva and others)
+    if (tagged) { rows.push([tagged[1], tagged[2].slice(0, 120)]); continue; }
+    const h2 = line.match(/^##\s+(.+)/);
+    if (h2 && !line.startsWith("###")) { mark = SECTION.find(([re]) => re.test(h2[1]))[1]; continue; }
+    const item = line.match(/^(?:###\s+|[-*]\s+)(.+)/);
+    if (item) rows.push([mark, item[1].replace(/\*\*/g, "").slice(0, 120)]);
+  }
+  return rows.slice(0, 15);
+}
+async function changelogRows(ex) {
+  try {
+    const d = await getJson(`${WEAO}/status/exploits/changelogs/${encodeURIComponent(ex.title)}`);
+    const list = Array.isArray(d.changelogs) ? d.changelogs : [];
+    const entry = list.find((c) => c.version === ex.version) || list[list.length - 1];
+    return entry ? parseChangelog(entry.changelog) : [];
+  } catch { return []; }
+}
+function executorEmbed(brand, e, rows) {
+  const at = Date.parse(String(e.updatedDate || "").replace(" at ", " ")) || Date.now();
+  const status = [e.updateStatus ? "Working" : "Down", e.suncPercentage != null && `sUNC ${e.suncPercentage}%`, e.uncPercentage != null && `UNC ${e.uncPercentage}%`,
+    e.free ? "Free" : (e.cost || "Paid"), e.detected && "Detected"].filter(Boolean).join("  |  ");
+  return releaseEmbed(brand, { title: `${e.title} Update`, to: e.version, roblox: e.rbxversion, at, rows })
+    .addFields({ name: "Status", value: status.slice(0, 1024) });
+}
+
 // Rename only when the dot actually changes: Discord allows 2 channel renames per 10 minutes.
 async function setDot(ch, state) {
   if (!ANY_DOT.test(ch.name)) return false;
@@ -56,10 +106,20 @@ async function setDot(ch, state) {
 async function tick(client, brand) {
   const channels = client.channels.cache.filter((c) => c.type === ChannelType.GuildText && TAG.test(c.topic || ""));
   const [list, versions] = await Promise.all([
-    channels.size ? exploits().catch(() => null) : null,
+    exploits().catch(() => null), // always: the snapshots need every tick
     robloxVersion().catch(() => null),
   ]);
   if (versions?.Windows) latest.roblox = versions.Windows;
+  // what changed per executor since the last tick (first sighting after a restart only records)
+  const changed = [];
+  for (const ex of list || []) {
+    const prev = snaps.get(ex.title);
+    let rows = prev ? diffRows(prev, ex) : [];
+    // a new version: lead with the executor's own changelog from WEAO (when WEAO has one for it)
+    if (prev && ex.version !== prev.version) rows = [...await changelogRows(ex), ...rows];
+    if (rows.length) changed.push({ ex, rows });
+    snaps.set(ex.title, snapOf(ex));
+  }
 
   for (const ch of channels.values()) {
     const [, target, seen] = ch.topic.match(TAG);
@@ -77,24 +137,17 @@ async function tick(client, brand) {
         await ch.setTopic(`weao:roblox ${versions.Windows}`);
       } else if (target.toLowerCase() === "ecc00") {
         await setDot(ch, await ecc00State());
+      } else if (target.toLowerCase() === "pc") {
+        // every Windows executor on WEAO, one post per executor that changed since the last check
+        for (const { ex, rows } of changed) {
+          if (String(ex.platform).toLowerCase() === "windows") await ch.send({ embeds: [executorEmbed(brand, ex, rows)] });
+        }
       } else if (list) {
         const ex = list.find((e) => e.title.toLowerCase() === target.toLowerCase());
         if (!ex) continue;
         await setDot(ch, ex.updateStatus ? "up" : "down");
-        // new executor version: post it in its status channel (the first sighting only records it)
-        if (ex.version && ex.version !== seen) {
-          if (seen) {
-            const at = Date.parse(String(ex.updatedDate || "").replace(" at ", " ")) || Date.now();
-            await ch.send({ embeds: [releaseEmbed(brand, {
-              title: `${ex.title} Update`, from: seen, to: ex.version, roblox: ex.rbxversion, at,
-              rows: [
-                ["+", `Updated to ${ex.rbxversion || "the latest Roblox"}`],
-                ex.updateStatus ? ["*", "Working on the current Roblox version"] : ["!", "Not updated for the current Roblox yet"],
-              ],
-            })] });
-          }
-          await ch.setTopic(`weao:${ex.title} ${ex.version}`);
-        }
+        const hit = changed.find((c) => c.ex === ex);
+        if (hit) await ch.send({ embeds: [executorEmbed(brand, ex, hit.rows)] });
       }
     } catch (e) {
       console.error(`tracker ${ch.name}:`, e.message);
