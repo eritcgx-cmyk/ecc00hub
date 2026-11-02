@@ -101,9 +101,11 @@ app.post("/api/exec", express.json({ limit: "2kb" }), async (req, res) => {
 const lastSession = new Map();
 app.post("/api/session", express.json({ limit: "2kb" }), async (req, res) => {
   const ip = String(req.headers["x-forwarded-for"] || req.ip).split(",")[0];
+  // 10 asks per 10s per IP: a house or school shares one IP, and the loader polls while waiting for a phrase
   const now = Date.now();
-  if (now - (lastSession.get(ip) || 0) < 1000) return res.status(429).json({ ok: false, reason: "Slow down." });
-  lastSession.set(ip, now);
+  const w = lastSession.get(ip);
+  if (!w || now - w.start > 10_000) lastSession.set(ip, { start: now, n: 1 });
+  else if (++w.n > 10) return res.status(429).json({ ok: false, reason: "Slow down." });
   try { res.json(await gate.session(client, req.body || {})); }
   catch (e) { console.error("session:", e.message); res.status(500).json({ ok: false, reason: "Server error, try again." }); }
 });
