@@ -140,16 +140,17 @@ async function session(client, b) {
   const game = games.byPlace.get(String(b.placeId)) || { key: "universal", name: "Universal", file: "universal.lua" };
   if (s.off[game.key]) return { ok: false, reason: `${game.name} is turned off right now.` };
   const mode = game.paid ? "keyed" : (s.modes[game.key] || s.defaultMode || "discord");
+  const about = { mode, game: game.key, name: game.name }; // every answer says which game, so the loader can show it
 
   // a key always counts, in any mode: it's how premium unlocks
   let tier = "free", profile = null, keyed = false;
   if (isStr(b.key, 128) && /^[\w-]{8,128}$/.test(b.key)) {
     const k = await jnkie.keyByValue(b.key).catch(() => null);
-    if (!jnkie.active(k)) return { ok: false, need: "key", getKey: s.getKeyUrl || null, reason: "That key is invalid or expired.", mode };
-    if (!(await bindKey(b.key, hwid))) return { ok: false, need: "key", getKey: s.getKeyUrl || null, reason: "This key is locked to another device. Reset HWID in the Discord panel.", mode };
+    if (!jnkie.active(k)) return { ok: false, need: "key", getKey: s.getKeyUrl || null, reason: "That key is invalid or expired.", ...about };
+    if (!(await bindKey(b.key, hwid))) return { ok: false, need: "key", getKey: s.getKeyUrl || null, reason: "This key is locked to another device. Reset HWID in the Discord panel.", ...about };
     // free checkpoint keys aren't premium and only last s.freeKeyHours (set from the PC terminal)
     if (!k.is_premium && Date.parse(k.created_at) + (s.freeKeyHours || 24) * 3600_000 < Date.now()) {
-      return { ok: false, need: "key", getKey: s.getKeyUrl || null, reason: "Your free key ran out. Get a new one.", mode };
+      return { ok: false, need: "key", getKey: s.getKeyUrl || null, reason: "Your free key ran out. Get a new one.", ...about };
     }
     keyed = true;
     tier = k.is_premium ? jnkie.tierOf(k) : "free";
@@ -162,13 +163,13 @@ async function session(client, b) {
       const phrase = phraseFor(robloxId, hwid);
       pending.set(phrase, { robloxId, hwid, exp: Date.now() + PHRASE_MINUTES * 60_000 });
       const ch = s.verifyChannel && client.channels.cache.get(s.verifyChannel);
-      return { ok: false, need: "discord", phrase, channel: ch ? `#${ch.name}` : "#verify", mode };
+      return { ok: false, need: "discord", phrase, channel: ch ? `#${ch.name}` : "#verify", ...about };
     }
     profile = await profileOf(client, link.discordId);
   }
-  if (mode === "keyed" && !keyed) return { ok: false, need: "key", getKey: s.getKeyUrl || null, reason: "This game needs a key.", mode };
+  if (mode === "keyed" && !keyed) return { ok: false, need: "key", getKey: s.getKeyUrl || null, reason: "This game needs a key.", ...about };
   const premium = tier !== "free" || Boolean(store.data.freePremium[game.key]);
-  if (game.paid && !premium) return { ok: false, need: "key", getKey: s.getKeyUrl || null, reason: `${game.name} needs a premium key.`, mode };
+  if (game.paid && !premium) return { ok: false, need: "key", getKey: s.getKeyUrl || null, reason: `${game.name} needs a premium key.`, ...about };
 
   return {
     ok: true, mode, tier, premium, profile, game: game.key, name: game.name,
