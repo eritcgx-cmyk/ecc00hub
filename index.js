@@ -13,6 +13,7 @@ const store = require("./store");
 const allGames = () => [...BASE_GAMES.filter((g) => !store.data.removed.includes(g.key)), ...store.data.games];
 const jnkie = require("./jnkie");
 const tracker = require("./tracker");
+const gate = require("./gate");
 
 const { DISCORD_BOT_TOKEN, PORT = 10000 } = process.env;
 const PUBLIC_URL = (process.env.PUBLIC_URL || "").replace(/\/$/, ""); // this service's own https url
@@ -96,12 +97,54 @@ app.post("/api/exec", express.json({ limit: "2kb" }), async (req, res) => {
     { name: "User", value: `[${s(b.user, 40)}](https://www.roblox.com/users/${userId}/profile)` },
   )] }).catch(() => {});
 });
+// The loader asks this on every launch: may this Roblox account + device run this game? (see gate.js)
+const lastSession = new Map();
+app.post("/api/session", express.json({ limit: "2kb" }), async (req, res) => {
+  const ip = String(req.headers["x-forwarded-for"] || req.ip).split(",")[0];
+  const now = Date.now();
+  if (now - (lastSession.get(ip) || 0) < 1000) return res.status(429).json({ ok: false, reason: "Slow down." });
+  lastSession.set(ip, now);
+  try { res.json(await gate.session(client, req.body || {})); }
+  catch (e) { console.error("session:", e.message); res.status(500).json({ ok: false, reason: "Server error, try again." }); }
+});
+// The owner's PC terminal tool (ecc00.mjs) drives the loader setup through this. Same GATE_SECRET as the
+// tickets, sent as a Bearer token; anyone without it gets 403.
+app.post("/api/admin", express.json({ limit: "4kb" }), async (req, res) => {
+  const secret = process.env.GATE_SECRET || "";
+  const sent = Buffer.from(String(req.headers.authorization || "").replace(/^Bearer /, ""));
+  if (!secret || sent.length !== Buffer.byteLength(secret) || !require("crypto").timingSafeEqual(sent, Buffer.from(secret))) return res.status(403).json({ error: "forbidden" });
+  const g = gate.settings();
+  const { action, target, value } = req.body || {};
+  if (action === "mode") {
+    if (!gate.MODES.includes(value) && value !== "default") return res.status(400).json({ error: "mode must be keyless, discord, keyed or default" });
+    if (target === "loader") { if (value !== "default") g.defaultMode = value; }
+    else if (value === "default") delete g.modes[target];
+    else g.modes[target] = value;
+  } else if (action === "game") {
+    if (value === "off") g.off[target] = true; else delete g.off[target];
+  } else if (action === "maintenance") {
+    g.maintenance = value || null;
+  } else if (action === "keyhours") {
+    const h = Number(value);
+    if (!(h > 0 && h <= 8760)) return res.status(400).json({ error: "hours must be 1-8760" });
+    g.freeKeyHours = h;
+  } else if (action === "getkey") {
+    if (value && !/^https:\/\/\S+$/.test(value)) return res.status(400).json({ error: "link must start with https://" });
+    g.getKeyUrl = value || null;
+  } else if (action !== "show") {
+    return res.status(400).json({ error: "unknown action" });
+  }
+  if (action !== "show") await store.save();
+  res.json({ ...g, linked: gate.links.size, games: gate.gameList().map((x) => x.key) });
+});
 app.get("/health/jnkie", (_req, res) => jnkie.ping()
   .then((services) => res.json({ ok: true, services }))
   .catch((e) => res.status(502).json({ ok: false, error: e.message })));
 
 // ---------------------------------------------------------------- shared bits
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+// GuildMessages + MessageContent read phrases typed in the verify channel; GuildMembers sees people leave.
+// MessageContent and GuildMembers are "privileged": they must be switched on in the Discord Developer Portal.
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers] });
 const UNIVERSAL = `loadstring(game:HttpGet("${HUB_LOADER}"))()`;
 const freeGames = () => allGames().filter((g) => !g.paid && !g.soon);
 const paidGames = () => allGames().filter((g) => g.paid);
@@ -176,6 +219,7 @@ async function paidButton(i, action) {
   const wait = (lastReset.get(i.user.id) || 0) + HWID_COOLDOWN - Date.now();
   if (wait > 0) return i.editReply({ content: `You can reset again ${when(new Date(Date.now() + wait).toISOString())}.` });
   await jnkie.resetHwid(key);
+  gate.resetBind(key.key_value); // the loader's own device lock too
   lastReset.set(i.user.id, Date.now());
   return i.editReply({ content: "HWID reset. Run the script on your new device." });
 }
@@ -213,6 +257,8 @@ const pingOpt = (o) => o.setName("ping").setDescription("Who to ping").addChoice
 const chanOpt = (o) => o.setName("channel").setDescription("Where to post (default: here)").addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement);
 
 const gameChoices = () => allGames().slice(0, 22).map((g) => ({ name: g.name, value: g.key })); // Discord caps choices at 25
+const gateChoices = () => [{ name: "Loader (default)", value: "loader" }, { name: "Universal", value: "universal" },
+  ...gate.gameList().slice(0, 23).map((g) => ({ name: g.name.slice(0, 100), value: g.key }))];
 const buildCmds = () => [
   new SlashCommandBuilder().setName("panel").setDescription("Post a panel").setDefaultMemberPermissions(staff)
     .addStringOption((o) => o.setName("type").setDescription("Which panel").setRequired(true)
@@ -262,6 +308,21 @@ const buildCmds = () => [
     .addChannelOption(chanOpt).addStringOption(pingOpt),
   new SlashCommandBuilder().setName("ticket").setDescription("Post the support ticket panel").setDefaultMemberPermissions(staff)
     .addChannelOption(chanOpt),
+  new SlashCommandBuilder().setName("gate").setDefaultMemberPermissions(staff).setDescription("Loader key system")
+    .addSubcommand((s) => s.setName("mode").setDescription("Key mode for a game, or the loader default")
+      .addStringOption((o) => o.setName("target").setDescription("Game, or Loader (default for every game)").setRequired(true).addChoices(...gateChoices()))
+      .addStringOption((o) => o.setName("mode").setDescription("Mode").setRequired(true).addChoices(
+        { name: "Keyless", value: "keyless" }, { name: "Discord", value: "discord" }, { name: "Keyed", value: "keyed" }, { name: "Use loader default", value: "default" })))
+    .addSubcommand((s) => s.setName("game").setDescription("Turn a game on or off")
+      .addStringOption((o) => o.setName("target").setDescription("Game").setRequired(true).addChoices(...gateChoices().slice(1)))
+      .addStringOption((o) => o.setName("state").setDescription("On or off").setRequired(true).addChoices({ name: "On", value: "on" }, { name: "Off", value: "off" })))
+    .addSubcommand((s) => s.setName("maintenance").setDescription("Put the whole loader in maintenance")
+      .addStringOption((o) => o.setName("message").setDescription("Shown in the loader. Leave empty to end maintenance.")))
+    .addSubcommand((s) => s.setName("verify").setDescription("Channel where players type their phrase")
+      .addChannelOption((o) => o.setName("channel").setDescription("Verify channel").setRequired(true).addChannelTypes(ChannelType.GuildText)))
+    .addSubcommand((s) => s.setName("unlink").setDescription("Remove someone's Discord link (they verify again)")
+      .addUserOption((o) => o.setName("user").setDescription("Who").setRequired(true)))
+    .addSubcommand((s) => s.setName("show").setDescription("Show the current setup")),
   new SlashCommandBuilder().setName("logs").setDescription("Set where script execution logs go").setDefaultMemberPermissions(staff)
     .addChannelOption((o) => o.setName("channel").setDescription("Log channel (leave empty to turn logs off)").addChannelTypes(ChannelType.GuildText))
     .addMentionableOption((o) => o.setName("ping").setDescription("Who gets pinged on each execution (you, or a role)")),
@@ -437,6 +498,46 @@ async function onCommand(i) {
       return reply(i, { content: `Ticket panel posted in ${ch}.` });
     }
 
+    case "gate": {
+      const g = gate.settings();
+      const sub = o.getSubcommand();
+      const target = o.getString("target");
+      const nameOf = (k) => k === "loader" ? "the loader" : k === "universal" ? "Universal" : (gate.gameList().find((x) => x.key === k)?.name || k);
+      let msg;
+      if (sub === "mode") {
+        const mode = o.getString("mode");
+        if (target === "loader") { if (mode !== "default") g.defaultMode = mode; }
+        else if (mode === "default") delete g.modes[target];
+        else g.modes[target] = mode;
+        msg = `Key mode for ${nameOf(target)}: **${target === "loader" ? g.defaultMode : (g.modes[target] || `loader default (${g.defaultMode})`)}**.`;
+      } else if (sub === "game") {
+        if (o.getString("state") === "off") g.off[target] = true; else delete g.off[target];
+        msg = `${nameOf(target)} is now **${g.off[target] ? "off" : "on"}**.`;
+      } else if (sub === "maintenance") {
+        g.maintenance = o.getString("message") || null;
+        msg = g.maintenance ? `Loader in maintenance: "${g.maintenance}"` : "Maintenance ended.";
+      } else if (sub === "verify") {
+        g.verifyChannel = o.getChannel("channel").id;
+        msg = `Players now type their phrase in ${o.getChannel("channel")}.`;
+      } else if (sub === "unlink") {
+        const n = gate.dropLinksOf(o.getUser("user").id);
+        return reply(i, { content: `Removed ${n} link(s) for ${o.getUser("user")}.` });
+      } else {
+        const modes = Object.entries(g.modes).map(([k, m]) => `${nameOf(k)}: ${m}`).join("\n") || "none";
+        const off = Object.keys(g.off).map(nameOf).join(", ") || "none";
+        return reply(i, { embeds: [brand(new EmbedBuilder()).setTitle("Loader setup").addFields(
+          { name: "Default mode", value: g.defaultMode, inline: true },
+          { name: "Maintenance", value: g.maintenance || "off", inline: true },
+          { name: "Verify channel", value: g.verifyChannel ? `<#${g.verifyChannel}>` : "not set", inline: true },
+          { name: "Per-game modes", value: modes.slice(0, 1024) },
+          { name: "Turned off", value: off.slice(0, 1024) },
+          { name: "Linked players", value: String(gate.links.size), inline: true },
+        )] });
+      }
+      await store.save();
+      return reply(i, { content: msg });
+    }
+
     case "logs": {
       const ch = o.getChannel("channel");
       const who = o.getMentionable("ping");
@@ -526,6 +627,9 @@ async function ticketButton(i, action) {
   return i.editReply(`Ticket opened: ${ch}`);
 }
 
+client.on(Events.MessageCreate, (m) => gate.onMessage(m).catch((e) => console.error("verify:", e.message)));
+client.on(Events.GuildMemberRemove, gate.onLeave);
+
 client.on(Events.InteractionCreate, async (i) => {
   try {
     if (i.isChatInputCommand()) return await onCommand(i);
@@ -540,6 +644,7 @@ client.on(Events.InteractionCreate, async (i) => {
 client.once(Events.ClientReady, async () => {
   console.log(`[+] ECC00 bot online as ${client.user.tag}`);
   try { await store.load(client); } catch (e) { console.error("store load:", e.message); }
+  try { await gate.load(client); } catch (e) { console.error("gate load:", e.message); }
   await registerCommands();
   applyStatus();
   setInterval(applyStatus, 60_000);
