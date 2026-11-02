@@ -121,6 +121,22 @@ function phraseFor(robloxId, hwid) {
   return `ecc00 ${WORDS[h[0] % WORDS.length]} ${WORDS[h[1] % WORDS.length]} ${h.readUInt16BE(2) % 900 + 100}`;
 }
 
+// No verify channel set yet: use one called "verify", or make it (everyone can type, the bot cleans up).
+async function ensureVerifyChannel(client) {
+  const guild = client.guilds?.cache.first();
+  if (!guild) return;
+  let ch = guild.channels.cache.find((c) => c.name === "verify" && c.type === ChannelType.GuildText);
+  if (!ch) {
+    ch = await guild.channels.create({
+      name: "verify", type: ChannelType.GuildText, rateLimitPerUser: 5,
+      topic: "Type the phrase the ECC00 loader shows you. Your message is deleted right after.",
+    }).catch(() => null);
+  }
+  if (!ch) return;
+  settings().verifyChannel = ch.id;
+  await store.save().catch(() => {});
+}
+
 // ---------------------------------------------------------------- the launch check
 const isId = (v) => /^\d{1,20}$/.test(String(v));
 const isStr = (v, max) => typeof v === "string" && v.length > 0 && v.length <= max;
@@ -133,11 +149,14 @@ async function profileOf(client, discordId) {
 async function session(client, b) {
   const s = settings();
   if (!SECRET) return { ok: false, reason: "Loader is not set up yet." };
+  if (!s.verifyChannel) await ensureVerifyChannel(client);
   if (!isId(b.robloxId) || !isStr(b.hwid, 128) || !isId(b.placeId)) return { ok: false, reason: "Bad request." };
   if (s.maintenance) return { ok: false, reason: s.maintenance };
   const robloxId = String(b.robloxId), hwid = b.hwid;
 
-  const game = games.byPlace.get(String(b.placeId)) || { key: "universal", name: "Universal", file: "universal.lua" };
+  const UNIVERSAL = { key: "universal", name: "Universal", file: "universal.lua" };
+  // the loader's game picker can ask for Universal instead of the detected game
+  const game = b.want === "universal" ? UNIVERSAL : (games.byPlace.get(String(b.placeId)) || UNIVERSAL);
   if (s.off[game.key]) return { ok: false, reason: `${game.name} is turned off right now.` };
   const mode = game.paid ? "keyed" : (s.modes[game.key] || s.defaultMode || "discord");
   const about = { mode, game: game.key, name: game.name }; // every answer says which game, so the loader can show it
