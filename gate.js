@@ -23,6 +23,7 @@ const PHRASE_MINUTES = 15;
 const MODES = ["keyless", "discord", "keyed"];
 
 const links = new Map(); // robloxId -> { discordId, hwid, msg }
+const lastSeen = new Map(); // robloxId -> { discordId, tier } of their last allowed launch (key or link), for the logs
 const binds = new Map(); // sha256(key) -> { hwid, msg }
 const pending = new Map(); // phrase -> { robloxId, hwid, exp }
 let dbChannel = null;
@@ -190,6 +191,7 @@ async function session(client, b) {
   const premium = tier !== "free" || Boolean(store.data.freePremium[game.key]);
   if (game.paid && !premium) return { ok: false, need: "key", getKey: s.getKeyUrl || null, reason: `${game.name} needs a premium key.`, ...about };
 
+  if (profile) lastSeen.set(robloxId, { discordId: profile.id, tier });
   return {
     ok: true, mode, tier, premium, profile, game: game.key, name: game.name,
     ticket: ticket({ g: game.key, f: game.file, p: premium ? 1 : 0, r: robloxId }),
@@ -221,4 +223,4 @@ const gameList = () => [...games.byKey.values()];
 // gate.test.js swaps in a fake db channel and game list
 const _setForTest = (db, list) => { dbChannel = db; games = { byPlace: new Map(list.flatMap((g) => g.places.map((p) => [String(p), g]))), byKey: new Map(list.map((g) => [g.key, g])) }; };
 
-module.exports = { _setForTest, load, session, onMessage, onLeave, settings, resetBind, dropLinksOf, refreshGames, gameList, links, MODES };
+module.exports = { _setForTest, load, session, onMessage, onLeave, settings, resetBind, dropLinksOf, refreshGames, gameList, links, lastSeen, MODES };

@@ -90,7 +90,8 @@ app.post("/api/exec", express.json({ limit: "2kb" }), async (req, res) => {
   const ch = client.channels.cache.get(store.data.logChannel);
   if (!ch) return;
   // Discord comes from the bot's own link table, not from what the loader claims
-  const link = gate.links.get(String(userId));
+  // a premium key carries its owner's Discord too, so fall back to whoever their last allowed launch was
+  const link = gate.links.get(String(userId)) || gate.lastSeen.get(String(userId));
   const job = /^[\w-]{8,64}$/.test(String(b.jobId || "")) ? b.jobId : null;
   ch.send({ content: store.data.logPing || undefined, allowedMentions: { parse: ["users", "roles"] }, embeds: [brand(new EmbedBuilder()).setTitle("Script Executed").setTimestamp().addFields(
     { name: "Script", value: s(b.script), inline: true },
