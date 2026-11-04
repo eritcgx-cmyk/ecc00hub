@@ -168,7 +168,7 @@ const TIERS = ["user", "premium", "dev", "staff", "owner"];
 const brand = (e) => e.setColor(EMBED).setAuthor({ name: "ECC00", iconURL: LOGO }).setFooter({ text: "eccohub.xyz", iconURL: LOGO });
 const avatar = (u) => u.displayAvatarURL({ extension: "png", size: 128 });
 const lua = (s) => "```lua\n" + s + "\n```";
-const inline = (games) => games.map((g) => g.name).join("  \u2022  ") || "-";
+const column = (games) => games.map((g) => "\u25B8 " + g.name).join("\n") || "-";
 const when = (iso) => (iso ? `<t:${Math.floor(new Date(iso) / 1000)}:R>` : "Never");
 const reply = (i, body) => (i.deferred || i.replied ? i.editReply(body) : i.reply({ ...body, ephemeral: true }));
 
@@ -426,8 +426,16 @@ async function onCommand(i) {
       return reply(i, { content: "Panel posted." });
 
     case "games":
-      return i.reply({ embeds: [brand(new EmbedBuilder()).setTitle(`${freeGames().length + paidGames().length} Supported Games`)
-        .addFields({ name: "Premium", value: inline(paidGames()) }, { name: "Free", value: inline(freeGames()) })] });
+    {
+      const paid = paidGames(), free = freeGames();
+      return i.reply({
+        embeds: [brand(new EmbedBuilder()).setTitle("Supported Games").setThumbnail(LOGO)
+          .setDescription(`**${paid.length + free.length} games, one loader.** It picks the right script for the game you're in.`)
+          .addFields({ name: `Premium (${paid.length})`, value: column(paid), inline: true }, { name: `Free (${free.length})`, value: column(free), inline: true })],
+        components: [new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setLabel("Get ECC00").setStyle(ButtonStyle.Link).setURL("https://eccohub.xyz"))],
+      });
+    }
 
     case "whitelist": {
       await i.deferReply({ ephemeral: true });
