@@ -138,9 +138,9 @@ app.post("/api/admin", express.json({ limit: "4kb" }), async (req, res) => {
     const h = Number(value);
     if (!(h > 0 && h <= 8760)) return res.status(400).json({ error: "hours must be 1-8760" });
     g.freeKeyHours = h;
-  } else if (action === "panda") {
-    if (value && !/^https:\/\/vault\.pandauth\.com\/\S+$/.test(value)) return res.status(400).json({ error: "expected a https://vault.pandauth.com/... link" });
-    if (value) g.panda[target] = value; else delete g.panda[target];
+  } else if (action === "build") {
+    if (value && !/^https:\/\/(vault\.pandauth\.com|api\.jnkie\.com)\/\S+$/.test(value)) return res.status(400).json({ error: "expected a vault.pandauth.com or api.jnkie.com link" });
+    if (value) g.build[target] = value; else delete g.build[target];
   } else if (action === "getkey") {
     if (value && !/^https:\/\/\S+$/.test(value)) return res.status(400).json({ error: "link must start with https://" });
     g.getKeyUrl = value || null;

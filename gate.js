@@ -30,8 +30,10 @@ let dbChannel = null;
 let games = { byPlace: new Map(), byKey: new Map() };
 
 const settings = () => {
-  store.data.gate ||= { defaultMode: "discord", modes: {}, off: {}, maintenance: null, verifyChannel: null, freeKeyHours: 24, panda: {} };
-  store.data.gate.panda ||= {}; // game key -> Panda Vault link (kept here, not in this public repo)
+  store.data.gate ||= { defaultMode: "discord", modes: {}, off: {}, maintenance: null, verifyChannel: null, freeKeyHours: 24, build: {} };
+  // game key -> where that game's protected build lives (Panda Vault or a JNKIE loader).
+  // Kept here rather than in this public repo.
+  store.data.gate.build ||= store.data.gate.panda || {};
   return store.data.gate;
 };
 
@@ -195,8 +197,8 @@ async function session(client, b) {
   if (profile) lastSeen.set(robloxId, { discordId: profile.id, tier });
   return {
     ok: true, mode, tier, premium, profile, game: game.key, name: game.name,
-    // Luraph-protected build in Panda Vault, handed over only once the gate has passed
-    panda: s.panda[game.key] || null,
+    // Luraph-protected build (Panda Vault or JNKIE), handed over only once the gate has passed
+    build: s.build[game.key] || null,
     ticket: ticket({ g: game.key, f: game.file, p: premium ? 1 : 0, r: robloxId }),
   };
 }
