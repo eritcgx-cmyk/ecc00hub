@@ -430,10 +430,7 @@ async function onCommand(i) {
       const paid = paidGames(), free = freeGames();
       return i.reply({
         embeds: [brand(new EmbedBuilder()).setTitle("Supported Games").setThumbnail(LOGO)
-          .setDescription(`**${paid.length + free.length} games, one loader.** It picks the right script for the game you're in.`)
           .addFields({ name: `Premium (${paid.length})`, value: column(paid), inline: true }, { name: `Free (${free.length})`, value: column(free), inline: true })],
-        components: [new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setLabel("Get ECC00").setStyle(ButtonStyle.Link).setURL("https://eccohub.xyz"))],
       });
     }
 
