@@ -10,7 +10,8 @@ const {
 } = require("discord.js");
 const BASE_GAMES = require("./games");
 const store = require("./store");
-const allGames = () => [...BASE_GAMES.filter((g) => !store.data.removed.includes(g.key)), ...store.data.games];
+const isUi = (g) => /^(ecc00\s*)?ui$/i.test(g.name.trim()); // the UI gets /update posts but isn't a game
+const allGames = () => [...BASE_GAMES.filter((g) => !store.data.removed.includes(g.key)), ...store.data.games].filter((g) => !isUi(g));
 const jnkie = require("./jnkie");
 const tracker = require("./tracker");
 const gate = require("./gate");
@@ -148,7 +149,9 @@ app.post("/api/admin", express.json({ limit: "4kb" }), async (req, res) => {
     return res.status(400).json({ error: "unknown action" });
   }
   if (action !== "show") await store.save();
-  res.json({ ...g, linked: gate.links.size, games: gate.gameList().map((x) => x.key) });
+  res.json({ ...g, linked: gate.links.size, games: gate.gameList().map((x) => x.key),
+    saved: { games: store.data.games.map((x) => x.name), removed: store.data.removed, versions: store.data.versions,
+      freePremium: Object.keys(store.data.freePremium), logChannel: Boolean(store.data.logChannel) } });
 });
 app.get("/health/jnkie", (_req, res) => jnkie.ping()
   .then((services) => res.json({ ok: true, services }))
@@ -165,7 +168,7 @@ const TIERS = ["user", "premium", "dev", "staff", "owner"];
 const brand = (e) => e.setColor(EMBED).setAuthor({ name: "ECC00", iconURL: LOGO }).setFooter({ text: "eccohub.xyz", iconURL: LOGO });
 const avatar = (u) => u.displayAvatarURL({ extension: "png", size: 128 });
 const lua = (s) => "```lua\n" + s + "\n```";
-const list = (games) => games.map((g) => "- " + g.name).join("\n") || "-";
+const inline = (games) => games.map((g) => g.name).join("  \u2022  ") || "-";
 const when = (iso) => (iso ? `<t:${Math.floor(new Date(iso) / 1000)}:R>` : "Never");
 const reply = (i, body) => (i.deferred || i.replied ? i.editReply(body) : i.reply({ ...body, ephemeral: true }));
 
@@ -301,7 +304,7 @@ const buildCmds = () => [
     .addAttachmentOption((o) => o.setName("image").setDescription("Image")),
   new SlashCommandBuilder().setName("update").setDescription("Post an update or release log").setDefaultMemberPermissions(staff)
     .addStringOption((o) => o.setName("game").setDescription("Game, or the loader itself").setRequired(true)
-      .addChoices(...gameChoices(), { name: "ECC00 Private", value: "private" }, { name: "Loader", value: "loader" }))
+      .addChoices(...gameChoices(), { name: "ECC00 Private", value: "private" }, { name: "Loader", value: "loader" }, { name: "UI", value: "ui" }))
     .addStringOption((o) => o.setName("version").setDescription("New version, e.g. 2.6.0").setRequired(true))
     .addStringOption((o) => o.setName("type").setDescription("Update (default) or a new release")
       .addChoices({ name: "Update", value: "update" }, { name: "Release", value: "release" }))
@@ -423,8 +426,8 @@ async function onCommand(i) {
       return reply(i, { content: "Panel posted." });
 
     case "games":
-      return i.reply({ embeds: [brand(new EmbedBuilder()).setTitle("Supported Games").setThumbnail(LOGO)
-        .addFields({ name: "Paid", value: list(paidGames()) }, { name: "Free", value: list(freeGames()) })] });
+      return i.reply({ embeds: [brand(new EmbedBuilder()).setTitle(`${freeGames().length + paidGames().length} Supported Games`)
+        .addFields({ name: "Premium", value: inline(paidGames()) }, { name: "Free", value: inline(freeGames()) })] });
 
     case "whitelist": {
       await i.deferReply({ ephemeral: true });
@@ -474,7 +477,7 @@ async function onCommand(i) {
     case "update": {
       const key = o.getString("game");
       const game = allGames().find((g) => g.key === key);
-      const name = game ? game.name : key === "private" ? "ECC00 Private" : "Loader";
+      const name = game ? game.name : { private: "ECC00 Private", ui: "UI" }[key] || "Loader";
       const v = o.getString("version").trim();
       const rowsOf = (opt, mark) => lines(o.getString(opt) || "").map((t) => [mark, t]);
       const rows = [...rowsOf("added", "+"), ...rowsOf("improved", "*"), ...rowsOf("fixed", "!"), ...rowsOf("removed", "-")];

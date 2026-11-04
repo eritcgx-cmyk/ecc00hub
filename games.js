@@ -7,4 +7,5 @@ module.exports = [
   { key: "ftf",      name: "Flee the Facility", place: 893973440 },
   { key: "amber",    name: "Amber Alert" },
   { key: "verity",   name: "Survive Verity (Area 51)", place: 74716719697996 },
+  { key: "eternity", name: "Project Eternity", place: 108438460215241 },
 ];
