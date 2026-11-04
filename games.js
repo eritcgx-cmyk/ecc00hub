@@ -3,8 +3,8 @@
 module.exports = [
   { key: "dahood",   name: "Da Hood",          paid: true, place: 2788229376 },
   { key: "hoodc",    name: "Hood Customs",     paid: true, place: 9825515356 },
-  { key: "mm2",      name: "Murder Mystery 2" },
-  { key: "ftf",      name: "Flee the Facility", place: 893973440 },
+  { key: "mm2",      name: "Murder Mystery 2", freemium: true },
+  { key: "ftf",      name: "Flee the Facility", place: 893973440, freemium: true },
   { key: "amber",    name: "Amber Alert" },
   { key: "verity",   name: "Survive Verity (Area 51)", place: 74716719697996 },
   { key: "eternity", name: "Project Eternity", place: 108438460215241 },

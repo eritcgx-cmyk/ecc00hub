@@ -162,7 +162,8 @@ app.get("/health/jnkie", (_req, res) => jnkie.ping()
 // MessageContent and GuildMembers are "privileged": they must be switched on in the Discord Developer Portal.
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers] });
 const UNIVERSAL = `loadstring(game:HttpGet("${HUB_LOADER}"))()`;
-const freeGames = () => allGames().filter((g) => !g.paid && !g.soon);
+const freeGames = () => allGames().filter((g) => !g.paid && !g.freemium && !g.soon);
+const freemiumGames = () => allGames().filter((g) => g.freemium && !g.paid && !g.soon);
 const paidGames = () => allGames().filter((g) => g.paid);
 const TIERS = ["user", "premium", "dev", "staff", "owner"];
 const brand = (e) => e.setColor(EMBED).setAuthor({ name: "ECC00", iconURL: LOGO }).setFooter({ text: "eccohub.xyz", iconURL: LOGO });
@@ -178,6 +179,29 @@ function parseDuration(s) {
   const m = /^(\d+)\s*([mhdwy])/i.exec(s.trim());
   if (!m) throw new Error(`Can't read duration "${s}". Use 30m, 12h, 7d, 4w, 1y or lifetime.`);
   return Number(m[1]) * { m: 1, h: 60, d: 1440, w: 10080, y: 525600 }[m[2].toLowerCase()];
+}
+
+// ---------------------------------------------------------------- games list
+function gamesEmbed() {
+  const paid = paidGames(), mid = freemiumGames(), free = freeGames();
+  return brand(new EmbedBuilder()).setTitle("Supported Games").setThumbnail(LOGO).addFields(
+    { name: `Premium (${paid.length})`, value: column(paid), inline: true },
+    { name: `Freemium (${mid.length})`, value: column(mid), inline: true },
+    { name: `Free (${free.length})`, value: column(free), inline: true });
+}
+
+// The board deletes itself and reposts only when the list really changed, so restarts don't bump the channel.
+async function refreshBoard() {
+  const b = store.data.gamesBoard;
+  if (!b?.channel) return;
+  const sig = JSON.stringify([paidGames(), freemiumGames(), freeGames()].map((l) => l.map((g) => g.name)));
+  if (b.sig === sig) return;
+  const ch = await client.channels.fetch(b.channel).catch(() => null);
+  if (!ch) return console.error("games board: channel is gone");
+  if (b.message) await ch.messages.delete(b.message).catch(() => {});
+  const msg = await ch.send({ embeds: [gamesEmbed()] });
+  store.data.gamesBoard = { channel: b.channel, message: msg.id, sig };
+  await store.save();
 }
 
 // ---------------------------------------------------------------- panels
@@ -280,6 +304,8 @@ const buildCmds = () => [
     .addStringOption((o) => o.setName("type").setDescription("Which panel").setRequired(true)
       .addChoices({ name: "Free", value: "free" }, { name: "Paid", value: "paid" })),
   new SlashCommandBuilder().setName("games").setDescription("Show every supported game"),
+  new SlashCommandBuilder().setName("gamesboard").setDescription("Post a games list that keeps itself up to date").setDefaultMemberPermissions(staff)
+    .addChannelOption(chanOpt),
   new SlashCommandBuilder().setName("whitelist").setDescription("Manage premium access (JNKIE)").setDefaultMemberPermissions(staff)
     .addSubcommand((s) => s.setName("add").setDescription("Whitelist or renew a user")
       .addUserOption((o) => o.setName("user").setDescription("Who").setRequired(true))
@@ -400,6 +426,7 @@ async function onCommand(i) {
       if (!BASE_GAMES.some((g) => g.key === key)) store.data.games.push({ key, name, paid: o.getString("type") === "paid" });
       await store.save();
       await registerCommands();
+      await refreshBoard().catch((e) => console.error("games board:", e.message));
       return i.editReply(`Added **${name}** (${o.getString("type")}). It's in /games and /update now.`);
     }
     case "removegame": {
@@ -411,6 +438,7 @@ async function onCommand(i) {
       if (BASE_GAMES.some((g) => g.key === key)) store.data.removed.push(key);
       await store.save();
       await registerCommands();
+      await refreshBoard().catch((e) => console.error("games board:", e.message));
       return i.editReply(`Removed **${game.name}**.`);
     }
     case "freepremium": {
@@ -426,12 +454,14 @@ async function onCommand(i) {
       return reply(i, { content: "Panel posted." });
 
     case "games":
-    {
-      const paid = paidGames(), free = freeGames();
-      return i.reply({
-        embeds: [brand(new EmbedBuilder()).setTitle("Supported Games").setThumbnail(LOGO)
-          .addFields({ name: `Premium (${paid.length})`, value: column(paid), inline: true }, { name: `Free (${free.length})`, value: column(free), inline: true })],
-      });
+      return i.reply({ embeds: [gamesEmbed()] });
+
+    case "gamesboard": {
+      await i.deferReply({ ephemeral: true });
+      const ch = o.getChannel("channel") || i.channel;
+      store.data.gamesBoard = { ...store.data.gamesBoard, channel: ch.id, sig: null };
+      await refreshBoard();
+      return i.editReply(`Games board is in ${ch}. It replaces itself whenever the list changes.`);
     }
 
     case "whitelist": {
@@ -670,6 +700,7 @@ client.once(Events.ClientReady, async () => {
   applyStatus();
   setInterval(applyStatus, 60_000);
   tracker.start(client, brand);
+  refreshBoard().catch((e) => console.error("games board:", e.message)); // catches lists changed by a deploy
 });
 
 app.listen(PORT, () => console.log(`[+] web on :${PORT}`));
