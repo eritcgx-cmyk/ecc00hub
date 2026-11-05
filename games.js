@@ -8,4 +8,5 @@ module.exports = [
   { key: "amber",    name: "Amber Alert" },
   { key: "verity",   name: "Survive Verity (Area 51)", place: 74716719697996 },
   { key: "eternity", name: "Project Eternity", place: 108438460215241 },
+  { key: "closing",  name: "Closing Shift", place: 118297934142609 },
 ];
