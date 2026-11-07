@@ -92,11 +92,12 @@ app.post("/api/exec", express.json({ limit: "2kb" }), async (req, res) => {
   if (!ch) return;
   // Discord comes from the bot's own link table, not from what the loader claims
   // a premium key carries its owner's Discord too, so fall back to whoever their last allowed launch was
-  const link = gate.links.get(String(userId)) || gate.lastSeen.get(String(userId));
+  const seen = gate.lastSeen.get(String(userId));
+  const link = gate.links.get(String(userId)) || (seen?.discordId ? seen : null);
   const job = /^[\w-]{8,64}$/.test(String(b.jobId || "")) ? b.jobId : null;
   ch.send({ content: store.data.logPing || undefined, allowedMentions: { parse: ["users", "roles"] }, embeds: [brand(new EmbedBuilder()).setTitle("Script Executed").setTimestamp().addFields(
     { name: "Script", value: s(b.script), inline: true },
-    { name: "Plan", value: b.premium ? "ECC00 Private" : "Free", inline: true },
+    { name: "Plan", value: seen?.tester ? "Tester" : b.premium ? "ECC00 Private" : "Free", inline: true },
     { name: "Key mode", value: s(b.mode, 20), inline: true },
     { name: "Executor", value: s(b.executor), inline: true },
     { name: "Platform", value: s(b.platform, 20), inline: true },
@@ -145,6 +146,8 @@ app.post("/api/admin", express.json({ limit: "4kb" }), async (req, res) => {
   } else if (action === "getkey") {
     if (value && !/^https:\/\/\S+$/.test(value)) return res.status(400).json({ error: "link must start with https://" });
     g.getKeyUrl = value || null;
+  } else if (action === "tester") { // a new code replaces the old one right away
+    g.testerCode = value === "off" ? null : require("crypto").randomBytes(24).toString("hex");
   } else if (action !== "show") {
     return res.status(400).json({ error: "unknown action" });
   }

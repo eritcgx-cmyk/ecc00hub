@@ -150,6 +150,12 @@ async function profileOf(client, discordId) {
   return u ? { id: discordId, username: u.globalName || u.username, avatar: u.displayAvatarURL({ extension: "png", size: 128 }) } : null;
 }
 
+function isTester(key, code) {
+  if (!code || typeof key !== "string") return false;
+  const a = Buffer.from(key), b = Buffer.from(code);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
 async function session(client, b) {
   const s = settings();
   if (!SECRET) return { ok: false, reason: "Loader is not set up yet." };
@@ -167,7 +173,10 @@ async function session(client, b) {
 
   // a key always counts, in any mode: it's how premium unlocks
   let tier = "free", profile = null, keyed = false;
-  if (isStr(b.key, 128) && /^[\w-]{8,128}$/.test(b.key)) {
+  // ScriptBlox testers: one shared code that passes on any account or device, as a free user only
+  const tester = isTester(b.key, s.testerCode);
+  if (tester) keyed = true;
+  else if (isStr(b.key, 128) && /^[\w-]{8,128}$/.test(b.key)) {
     const k = await jnkie.keyByValue(b.key).catch(() => null);
     if (!jnkie.active(k)) return { ok: false, need: "key", getKey: s.getKeyUrl || null, reason: "That key is invalid or expired.", ...about };
     if (!(await bindKey(b.key, hwid))) return { ok: false, need: "key", getKey: s.getKeyUrl || null, reason: "This key is locked to another device. Reset HWID in the Discord panel.", ...about };
@@ -195,6 +204,7 @@ async function session(client, b) {
   if (game.paid && !premium) return { ok: false, need: "key", getKey: s.getKeyUrl || null, reason: `${game.name} needs a premium key.`, ...about };
 
   if (profile) lastSeen.set(robloxId, { discordId: profile.id, tier });
+  else if (tester) lastSeen.set(robloxId, { tester: true, tier });
   return {
     ok: true, mode, tier, premium, profile, game: game.key, name: game.name,
     // Luraph-protected build (Panda Vault or JNKIE), handed over only once the gate has passed

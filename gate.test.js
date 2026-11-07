@@ -53,6 +53,23 @@ const ask = (o) => gate.session(client, { robloxId: "1", hwid: "pc-a", placeId: 
 
   assert.equal((await ask({ placeId: "2788229376", key: "FREEKEY0001", hwid: "pc-a" })).need, "key", "paid game refuses free keys");
   assert.ok((await ask({ placeId: "2788229376", key: "PREMIUMKEY1" })).ok, "paid game takes premium");
+  // ScriptBlox tester code: skips Discord and the device lock, never premium
+  s.testerCode = "testercode123";
+  s.modes.ftf = "discord";
+  for (const who of [{ robloxId: "90", hwid: "pc-x" }, { robloxId: "91", hwid: "pc-y" }]) {
+    r = await ask({ ...who, key: "testercode123" });
+    assert.ok(r.ok && r.tier === "free" && !r.premium, "tester passes on any account and device");
+  }
+  assert.ok(gate.lastSeen.get("90").tester, "tester launches are marked for the logs");
+  s.modes.ftf = "keyed";
+  assert.ok((await ask({ key: "testercode123" })).ok, "tester passes keyed mode too");
+  s.modes.ftf = "discord";
+  assert.equal((await ask({ robloxId: "92", hwid: "pc-z", key: "testercode124" })).need, "key", "wrong code is just a bad key");
+  assert.equal((await ask({ robloxId: "92", hwid: "pc-z" })).need, "discord", "no code still needs Discord");
+  assert.equal((await ask({ placeId: "2788229376", key: "testercode123" })).need, "key", "paid game refuses tester");
+  s.testerCode = null;
+  assert.equal((await ask({ robloxId: "90", hwid: "pc-x", key: "testercode123" })).need, "key", "old code stops once cleared");
+
   s.off.ftf = true;
   assert.match((await ask({ key: "PREMIUMKEY1" })).reason, /turned off/);
   console.log("gate ok");
