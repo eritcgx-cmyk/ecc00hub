@@ -707,6 +707,7 @@ client.once(Events.ClientReady, async () => {
 });
 
 require("./spotify")(app, express); // Spotify addon: /spotify login, /api/spotify/*
+require("./skins")(app, express, client); // MM2 spoofer skin library: /api/mm2/skins
 app.listen(PORT, () => console.log(`[+] web on :${PORT}`));
 
 // Render's free tier sleeps a web service after ~15 idle minutes and takes the bot down with it, so the
