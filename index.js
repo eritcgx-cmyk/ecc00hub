@@ -706,6 +706,7 @@ client.once(Events.ClientReady, async () => {
   refreshBoard().catch((e) => console.error("games board:", e.message)); // catches lists changed by a deploy
 });
 
+require("./spotify")(app, express); // Spotify addon: /spotify login, /api/spotify/*
 app.listen(PORT, () => console.log(`[+] web on :${PORT}`));
 
 // Render's free tier sleeps a web service after ~15 idle minutes and takes the bot down with it, so the
