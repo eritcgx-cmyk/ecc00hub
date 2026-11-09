@@ -54,6 +54,37 @@ function coverColor(buf) {
   return hex(r) + hex(g) + hex(b);
 }
 
+// "Song (Remix) SLOWED - Remastered" -> "Song"
+function cleanTitle(t) {
+  return String(t).replace(/\s*[\(\[][^\)\]]*[\)\]]/g, "").replace(/\s+-\s+.*$/, "")
+    .replace(/\b(slowed|reverb|sped up|speed up|nightcore|remix|8d|bass boosted|tiktok version)\b.*$/i, "").trim() || String(t);
+}
+
+async function findLyrics(it) {
+  const d = (it.duration_ms || 0) / 1000;
+  const artist = it.artists?.[0]?.name || "";
+  const get = (u) => fetch(u, { headers: { "User-Agent": "ECC00 (eccohub.xyz)" } }).then((x) => (x.ok ? x.json() : null)).catch(() => null);
+  const exact = await get("https://lrclib.net/api/get?" + new URLSearchParams({ artist_name: artist, track_name: it.name, album_name: it.album?.name || "", duration: String(Math.round(d)) }));
+  if (exact?.syncedLyrics) return { lyrics: parseLrc(exact.syncedLyrics) };
+  const clean = cleanTitle(it.name);
+  let list = (await get("https://lrclib.net/api/search?" + new URLSearchParams({ track_name: clean, artist_name: artist }))) || [];
+  if (!list.length) list = (await get("https://lrclib.net/api/search?" + new URLSearchParams({ q: clean }))) || [];
+  const same = list.filter((x) => String(x.trackName).toLowerCase() === clean.toLowerCase());
+  const pool = (same.length ? same : list).filter((x) => x.syncedLyrics);
+  // closest length wins; a slowed/sped edit is the same song stretched, so its timings scale with the length
+  pool.sort((a, b) => Math.abs(a.duration - d) - Math.abs(b.duration - d));
+  const best = pool[0];
+  if (best) {
+    const ratio = best.duration ? d / best.duration : 1;
+    const k = ratio > 0.6 && ratio < 1.6 ? ratio : 1;
+    return { lyrics: parseLrc(best.syncedLyrics).map((l) => ({ t: l.t * k, l: l.l })) };
+  }
+  const plain = exact?.plainLyrics || list.find((x) => x.plainLyrics)?.plainLyrics;
+  return plain ? { lyrics: [], plain: plain.split("\n").filter(Boolean).slice(0, 150) } : { lyrics: [] };
+}
+
+const sha = (v) => crypto.createHash("sha256").update(String(v)).digest("hex");
+
 module.exports = function mount(app, express) {
   const states = new Map(); // oauth state -> expiry
   const codes = new Map(); // 6-digit code -> { token, name, premium, exp }
@@ -73,16 +104,25 @@ module.exports = function mount(app, express) {
     return j;
   }
   // access token for this player's token, refreshing when it expires. Returns { at, newToken? }.
-  async function accessFor(token) {
+  async function accessFor(token, device) {
     const data = open(token);
     if (!data || !data.r) return null;
+    if (data.h && data.h !== sha(device || "")) return null; // copied to another device
+
     const id = crypto.createHash("sha256").update(token).digest("hex");
     const hit = access.get(id);
-    if (hit && hit.exp > Date.now() + 5000) return { at: hit.at, data };
+    if (hit && hit.exp > Date.now() + 5000) {
+      const newToken = !data.h && device ? seal({ ...data, h: sha(device) }) : null; // lock an older token on first use
+      if (newToken) access.set(sha(newToken), hit);
+      return { at: hit.at, data, newToken };
+    }
     const j = await tokenCall({ grant_type: "refresh_token", refresh_token: data.r });
     access.set(id, { at: j.access_token, exp: Date.now() + j.expires_in * 1000 });
-    // Spotify sometimes rotates the refresh token: hand the player a new one to save
-    const newToken = j.refresh_token && j.refresh_token !== data.r ? seal({ ...data, r: j.refresh_token }) : null;
+    // Spotify sometimes rotates the refresh token, and tokens from before the device lock get locked now:
+    // either way the player gets a new token to save
+    const rotated = j.refresh_token && j.refresh_token !== data.r;
+    const lockNow = !data.h && device;
+    const newToken = rotated || lockNow ? seal({ ...data, r: rotated ? j.refresh_token : data.r, h: data.h || sha(device) }) : null;
     if (newToken) access.set(crypto.createHash("sha256").update(newToken).digest("hex"), access.get(id));
     return { at: j.access_token, data, newToken };
   }
@@ -125,12 +165,15 @@ module.exports = function mount(app, express) {
     const hit = codes.get(code);
     if (!hit || hit.exp < Date.now()) return res.json({ ok: false, error: "That code is wrong or expired. Get a new one at eccohub.xyz/spotify" });
     codes.delete(code);
-    res.json({ ok: true, token: hit.token, name: hit.name, premium: hit.premium });
+    const device = String(req.body?.device || "");
+    const data = open(hit.token);
+    const token = device && data ? seal({ ...data, h: sha(device) }) : hit.token; // locked to this device
+    res.json({ ok: true, token, name: hit.name, premium: hit.premium });
   });
 
   app.get("/api/spotify/now", async (req, res) => {
     try {
-      const a = await accessFor(req.query.t);
+      const a = await accessFor(req.get("x-ecc00-token") || req.query.t, req.get("x-ecc00-device"));
       if (!a) return res.json({ ok: false, error: "relink" });
       const r = await fetch("https://api.spotify.com/v1/me/player/currently-playing", { headers: { Authorization: "Bearer " + a.at } });
       const base = { ok: true, premium: Boolean(a.data.p), name: a.data.n, token: a.newToken || undefined };
@@ -146,16 +189,13 @@ module.exports = function mount(app, express) {
         progress: (j.progress_ms || 0) / 1000, duration: (it.duration_ms || 0) / 1000,
       };
       // lyrics + colour once per song; the script sends `have` with the song it already has
-      if (req.query.have !== it.id) {
+      if ((req.get("x-ecc00-have") ?? req.query.have) !== it.id) {
         let extra = tracks.get(it.id);
         if (!extra) {
           extra = { lyrics: [], color: null };
           const small = (it.album?.images || []).slice(-1)[0]?.url;
           await Promise.all([
-            fetch("https://lrclib.net/api/get?" + new URLSearchParams({ artist_name: it.artists?.[0]?.name || "", track_name: it.name, album_name: it.album?.name || "", duration: String(Math.round(it.duration_ms / 1000)) }),
-              { headers: { "User-Agent": "ECC00 (eccohub.xyz)" } })
-              .then((x) => (x.ok ? x.json() : null)).then((l) => { if (l) extra.lyrics = parseLrc(l.syncedLyrics) ; if (l && !extra.lyrics.length && l.plainLyrics) extra.plain = l.plainLyrics.split("\n").slice(0, 60); })
-              .catch(() => {}),
+            findLyrics(it).then((l) => Object.assign(extra, l)).catch(() => {}),
             small ? fetch(small).then((x) => x.arrayBuffer()).then((b) => { extra.color = coverColor(Buffer.from(b)); }).catch(() => {}) : null,
           ]);
           if (tracks.size > 500) tracks.clear(); // ponytail: crude bound, an LRU if memory ever matters
@@ -174,7 +214,7 @@ module.exports = function mount(app, express) {
     const rt = routes[req.body?.action];
     if (!rt) return res.status(400).json({ ok: false });
     try {
-      const a = await accessFor(req.body.t);
+      const a = await accessFor(req.body.t, req.body.device);
       if (!a) return res.json({ ok: false, error: "relink" });
       if (!a.data.p) return res.json({ ok: false, error: "Spotify Premium is needed for controls" });
       const r = await fetch("https://api.spotify.com/v1/me/player/" + rt[1], { method: rt[0], headers: { Authorization: "Bearer " + a.at } });
@@ -192,4 +232,4 @@ module.exports = function mount(app, express) {
   }, 60_000).unref();
 };
 
-module.exports._test = { seal, open, parseLrc };
+module.exports._test = { seal, open, parseLrc, cleanTitle };
