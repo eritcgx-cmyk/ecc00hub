@@ -160,6 +160,16 @@ app.post("/api/admin", express.json({ limit: "4kb" }), async (req, res) => {
     g.getKeyUrl = value || null;
   } else if (action === "tester") { // a new code replaces the old one right away
     g.testerCode = value === "off" ? null : require("crypto").randomBytes(24).toString("hex");
+  } else if (action === "update") { // value: { game, version, type, added, improved, fixed, removed, private, channel, ping }
+    const u = value || {};
+    const guild = client.guilds.cache.first();
+    const ch = guild && guild.channels.cache.find((c) => c.name === String(u.channel || "").replace(/^#/, "") && c.isTextBased());
+    if (!ch) return res.status(400).json({ error: "channel not found" });
+    const e = updateEmbed(String(u.game || ""), String(u.version || ""), u.type, (k) => u[k]);
+    if (!e) return res.status(400).json({ error: "no changes" });
+    const ping = PINGS[u.ping];
+    await ch.send({ content: ping, embeds: [e], allowedMentions: { parse: ping ? ["everyone"] : [] } });
+    return res.json({ ok: true, posted: `#${ch.name}` });
   } else if (action !== "show") {
     return res.status(400).json({ error: "unknown action" });
   }
@@ -419,6 +429,23 @@ const buildCmds = () => [
 ].map((c) => c.toJSON());
 
 const PINGS = { everyone: "@everyone", here: "@here" };
+// one /update post; get(k) reads the added/improved/fixed/removed/private text. Saves the version for "old -> new".
+function updateEmbed(key, version, type, get) {
+  const game = allGames().find((g) => g.key === key);
+  const name = game ? game.name : { private: "ECC00 Private", ui: "UI", universal: "Universal" }[key] || "Loader";
+  const v = String(version).trim();
+  const rowsOf = (opt, mark) => lines(get(opt) || "").map((t) => [mark, t]);
+  const rows = [...rowsOf("added", "+"), ...rowsOf("improved", "*"), ...rowsOf("fixed", "!"), ...rowsOf("removed", "-")];
+  const priv = rowsOf("private", "+");
+  if (!rows.length && !priv.length) return null;
+  const e = tracker.releaseEmbed(brand, {
+    title: `${name} ${type === "release" ? "Release" : "Update"}`,
+    from: store.data.versions[key], to: v, rows, extra: [["ECC00 Private", priv]],
+  }).setThumbnail(LOGO);
+  store.data.versions[key] = v; // next /update for this game shows "this -> new"
+  store.save().catch(() => {});
+  return e;
+}
 async function post(i, embed) {
   const ch = i.options.getChannel("channel") || i.channel;
   const ping = PINGS[i.options.getString("ping")];
@@ -540,20 +567,8 @@ async function onCommand(i) {
     }
 
     case "update": {
-      const key = o.getString("game");
-      const game = allGames().find((g) => g.key === key);
-      const name = game ? game.name : { private: "ECC00 Private", ui: "UI", universal: "Universal" }[key] || "Loader";
-      const v = o.getString("version").trim();
-      const rowsOf = (opt, mark) => lines(o.getString(opt) || "").map((t) => [mark, t]);
-      const rows = [...rowsOf("added", "+"), ...rowsOf("improved", "*"), ...rowsOf("fixed", "!"), ...rowsOf("removed", "-")];
-      const priv = rowsOf("private", "+");
-      if (!rows.length && !priv.length) return reply(i, { content: "Add at least one change (added, improved, fixed, removed or private)." });
-      const e = tracker.releaseEmbed(brand, {
-        title: `${name} ${o.getString("type") === "release" ? "Release" : "Update"}`,
-        from: store.data.versions[key], to: v, rows, extra: [["ECC00 Private", priv]],
-      }).setThumbnail(LOGO);
-      store.data.versions[key] = v; // next /update for this game shows "this -> new"
-      store.save().catch(() => {});
+      const e = updateEmbed(o.getString("game"), o.getString("version"), o.getString("type"), (k) => o.getString(k));
+      if (!e) return reply(i, { content: "Add at least one change (added, improved, fixed, removed or private)." });
       return post(i, e);
     }
 
