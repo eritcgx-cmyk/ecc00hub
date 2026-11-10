@@ -209,7 +209,8 @@ async function session(client, b) {
     ok: true, mode, tier, premium, profile, game: game.key, name: game.name,
     // Luraph-protected build (Panda Vault or JNKIE), handed over only once the gate has passed
     build: s.build[game.key] || null,
-    ticket: ticket({ g: game.key, f: game.file, p: premium ? 1 : 0, r: robloxId }),
+    // ff: premium features staff made free (/freefeature); /api/load serves those modules to this ticket too
+    ticket: ticket({ g: game.key, f: game.file, p: premium ? 1 : 0, r: robloxId, ff: (store.data.freeFeatures || {})[game.key] || [] }),
   };
 }
 

@@ -72,7 +72,17 @@ app.get("/api/key/:key", async (req, res) => {
   }
 });
 // Free (universal loader) scripts ask this on load: has staff made this script's premium features free?
-app.get("/api/free/:script", (req, res) => res.json({ free: Boolean(store.data.freePremium[req.params.script]) }));
+app.get("/api/free/:script", (req, res) => res.json({
+  free: Boolean(store.data.freePremium[req.params.script]),
+  features: (store.data.freeFeatures || {})[req.params.script] || [],
+}));
+
+// premium features that can be made free on their own (/freefeature). Each one is its own module in the private
+// Blob (premium/<game>_<feature>.lua), so making one free never hands out the rest of the premium code.
+const FEATURES = [
+  { value: "mm2:spoofer", name: "MM2 - Spoofer tab" },
+  { value: "mm2:autothrow", name: "MM2 - Auto Throw Knife" },
+];
 // The loader reports each launch here; it lands in the channel set with /logs. Anyone can call this, so it is
 // size-capped and rate-limited (one log per Roblox user per 30s, 30 a minute overall) and never pings anyone.
 const lastExec = new Map();
@@ -400,6 +410,10 @@ const buildCmds = () => [
       .addChoices(...freeGames().slice(0, 25).map((g) => ({ name: g.name, value: g.key }))))
     .addStringOption((o) => o.setName("state").setDescription("On = premium free for everyone").setRequired(true)
       .addChoices({ name: "On", value: "on" }, { name: "Off", value: "off" })),
+  new SlashCommandBuilder().setName("freefeature").setDescription("Make one premium feature free for everyone (or key-only again)").setDefaultMemberPermissions(staff)
+    .addStringOption((o) => o.setName("feature").setDescription("Feature").setRequired(true).addChoices(...FEATURES))
+    .addStringOption((o) => o.setName("state").setDescription("On = free for everyone").setRequired(true)
+      .addChoices({ name: "On", value: "on" }, { name: "Off", value: "off" })),
 ].map((c) => c.toJSON());
 
 const PINGS = { everyone: "@everyone", here: "@here" };
@@ -451,6 +465,17 @@ async function onCommand(i) {
       await store.save();
       const game = allGames().find((g) => g.key === key);
       return reply(i, { content: `Premium in **${game ? game.name : key}** is now ${on ? "free for everyone" : "key-only again"}. Takes effect next time the script loads.` });
+    }
+    case "freefeature": {
+      const [game, feature] = o.getString("feature").split(":");
+      const on = o.getString("state") === "on";
+      const ff = (store.data.freeFeatures ||= {});
+      const list = new Set(ff[game] || []);
+      if (on) list.add(feature); else list.delete(feature);
+      if (list.size) ff[game] = [...list]; else delete ff[game];
+      await store.save();
+      const name = FEATURES.find((f) => f.value === o.getString("feature")).name;
+      return reply(i, { content: `**${name}** is now ${on ? "free for everyone" : "key-only again"}. Takes effect next time the script loads.` });
     }
     case "panel":
       await i.channel.send(o.getString("type") === "paid" ? paidPanel() : freePanel());

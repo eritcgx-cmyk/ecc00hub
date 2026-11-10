@@ -2,7 +2,7 @@
 // #ecc00-data channel the bot creates for itself.
 const { ChannelType, PermissionFlagsBits } = require("discord.js");
 
-const data = { games: [], removed: [], freePremium: {}, versions: {}, logChannel: null, gamesBoard: null };
+const data = { games: [], removed: [], freePremium: {}, freeFeatures: {}, versions: {}, logChannel: null, gamesBoard: null };
 let msg = null;
 
 const render = () => "```json\n" + JSON.stringify(data) + "\n```";
