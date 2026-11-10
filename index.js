@@ -163,7 +163,7 @@ app.post("/api/admin", express.json({ limit: "4kb" }), async (req, res) => {
   } else if (action === "update") { // value: { game, version, type, added, improved, fixed, removed, private, channel, ping }
     const u = value || {};
     const guild = client.guilds.cache.first();
-    const plain = (n) => String(n || "").toLowerCase().replace(/[^a-z0-9]/g, ""); // "📢・updates" matches "updates"
+    const plain = (n) => String(n || "").normalize("NFKC").toLowerCase().replace(/[^a-z0-9]/g, ""); // "📢・updates" matches "updates"
     const want = plain(u.channel);
     const text = guild ? [...guild.channels.cache.values()].filter((c) => c.isTextBased() && !c.isThread?.()) : [];
     const ch = want && (text.find((c) => plain(c.name) === want) || text.find((c) => plain(c.name).includes(want)));
