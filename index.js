@@ -422,7 +422,7 @@ const buildCmds = () => [
     .addStringOption((o) => o.setName("game").setDescription("Game").setRequired(true).addChoices(...gameChoices())),
   new SlashCommandBuilder().setName("freepremium").setDescription("Unlock a free script's premium features for everyone").setDefaultMemberPermissions(staff)
     .addStringOption((o) => o.setName("script").setDescription("Universal-loader script (JNKIE scripts aren't affected)").setRequired(true)
-      .addChoices(...freeGames().slice(0, 25).map((g) => ({ name: g.name, value: g.key }))))
+      .addChoices(...[...freemiumGames(), ...freeGames()].slice(0, 25).map((g) => ({ name: g.name, value: g.key }))))
     .addStringOption((o) => o.setName("state").setDescription("On = premium free for everyone").setRequired(true)
       .addChoices({ name: "On", value: "on" }, { name: "Off", value: "off" })),
   ...(FEATURES.length ? [new SlashCommandBuilder().setName("freefeature").setDescription("Make one premium feature free for everyone (or key-only again)").setDefaultMemberPermissions(staff)
