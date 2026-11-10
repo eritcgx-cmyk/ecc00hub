@@ -79,10 +79,9 @@ app.get("/api/free/:script", (req, res) => res.json({
 
 // premium features that can be made free on their own (/freefeature). Each one is its own module in the private
 // Blob (premium/<game>_<feature>.lua), so making one free never hands out the rest of the premium code.
-const FEATURES = [
-  { value: "mm2:spoofer", name: "MM2 - Spoofer tab" },
-  { value: "mm2:autothrow", name: "MM2 - Auto Throw Knife" },
-];
+// Empty for now: MM2's Spoofer + Auto Throw live in its one premium file (key-only, or /freepremium).
+// Add { value: "<game>:<feature>", name } here once a feature ships as its own premium/<game>_<feature>.lua.
+const FEATURES = [];
 // The loader reports each launch here; it lands in the channel set with /logs. Anyone can call this, so it is
 // size-capped and rate-limited (one log per Roblox user per 30s, 30 a minute overall) and never pings anyone.
 const lastExec = new Map();
@@ -410,10 +409,10 @@ const buildCmds = () => [
       .addChoices(...freeGames().slice(0, 25).map((g) => ({ name: g.name, value: g.key }))))
     .addStringOption((o) => o.setName("state").setDescription("On = premium free for everyone").setRequired(true)
       .addChoices({ name: "On", value: "on" }, { name: "Off", value: "off" })),
-  new SlashCommandBuilder().setName("freefeature").setDescription("Make one premium feature free for everyone (or key-only again)").setDefaultMemberPermissions(staff)
+  ...(FEATURES.length ? [new SlashCommandBuilder().setName("freefeature").setDescription("Make one premium feature free for everyone (or key-only again)").setDefaultMemberPermissions(staff)
     .addStringOption((o) => o.setName("feature").setDescription("Feature").setRequired(true).addChoices(...FEATURES))
     .addStringOption((o) => o.setName("state").setDescription("On = free for everyone").setRequired(true)
-      .addChoices({ name: "On", value: "on" }, { name: "Off", value: "off" })),
+      .addChoices({ name: "On", value: "on" }, { name: "Off", value: "off" }))] : []),
 ].map((c) => c.toJSON());
 
 const PINGS = { everyone: "@everyone", here: "@here" };
