@@ -345,7 +345,7 @@ const buildCmds = () => [
     .addAttachmentOption((o) => o.setName("image").setDescription("Image")),
   new SlashCommandBuilder().setName("update").setDescription("Post an update or release log").setDefaultMemberPermissions(staff)
     .addStringOption((o) => o.setName("game").setDescription("Game, or the loader itself").setRequired(true)
-      .addChoices(...gameChoices(), { name: "ECC00 Private", value: "private" }, { name: "Loader", value: "loader" }, { name: "UI", value: "ui" }))
+      .addChoices(...gameChoices(), { name: "ECC00 Private", value: "private" }, { name: "Loader", value: "loader" }, { name: "UI", value: "ui" }, { name: "Universal", value: "universal" }))
     .addStringOption((o) => o.setName("version").setDescription("New version, e.g. 2.6.0").setRequired(true))
     .addStringOption((o) => o.setName("type").setDescription("Update (default) or a new release")
       .addChoices({ name: "Update", value: "update" }, { name: "Release", value: "release" }))
@@ -542,7 +542,7 @@ async function onCommand(i) {
     case "update": {
       const key = o.getString("game");
       const game = allGames().find((g) => g.key === key);
-      const name = game ? game.name : { private: "ECC00 Private", ui: "UI" }[key] || "Loader";
+      const name = game ? game.name : { private: "ECC00 Private", ui: "UI", universal: "Universal" }[key] || "Loader";
       const v = o.getString("version").trim();
       const rowsOf = (opt, mark) => lines(o.getString(opt) || "").map((t) => [mark, t]);
       const rows = [...rowsOf("added", "+"), ...rowsOf("improved", "*"), ...rowsOf("fixed", "!"), ...rowsOf("removed", "-")];
