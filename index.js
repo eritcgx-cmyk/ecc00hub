@@ -79,9 +79,12 @@ app.get("/api/free/:script", (req, res) => res.json({
 
 // premium features that can be made free on their own (/freefeature). Each one is its own module in the private
 // Blob (premium/<game>_<feature>.lua), so making one free never hands out the rest of the premium code.
-// Empty for now: MM2's Spoofer + Auto Throw live in its one premium file (key-only, or /freepremium).
-// Add { value: "<game>:<feature>", name } here once a feature ships as its own premium/<game>_<feature>.lua.
-const FEATURES = [];
+// While any of a game's features is free, /api/load sends that game's premium file to everyone and the script
+// unlocks only the free features (the rest stay locked rows).
+const FEATURES = [
+  { value: "mm2:spoofer", name: "MM2 - Spoofer tab" },
+  { value: "mm2:autothrow", name: "MM2 - Auto Throw Knife" },
+];
 // The loader reports each launch here; it lands in the channel set with /logs. Anyone can call this, so it is
 // size-capped and rate-limited (one log per Roblox user per 30s, 30 a minute overall) and never pings anyone.
 const lastExec = new Map();
