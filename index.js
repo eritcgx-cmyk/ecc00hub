@@ -233,6 +233,25 @@ async function refreshBoard() {
 }
 
 // ---------------------------------------------------------------- panels
+// ---------------------------------------------------------------- free keys (JNKIE): /key and the Get Key panel
+function keyPanel() {
+  const hours = gate.settings().freeKeyHours || 24;
+  return {
+    embeds: [brand(new EmbedBuilder()).setTitle("ECC00 Key").setThumbnail(LOGO)
+      .setDescription(`Some games need a key. Press **Get Key**, then paste it into the ECC00 loader.\nFree keys last ${hours}h and lock to the first device that uses them.`)],
+    components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId("key:get").setLabel("Get Key").setStyle(ButtonStyle.Primary))],
+  };
+}
+async function giveKey(i) {
+  await i.deferReply({ ephemeral: true });
+  if (!jnkie.ready()) return i.editReply("Keys aren't set up yet. Ask staff.");
+  const hours = gate.settings().freeKeyHours || 24;
+  const { key, fresh } = await jnkie.freeKey(i.user.id, hours);
+  const kind = key.is_premium ? "your premium key" : fresh ? `a new free key (${hours}h)` : "your free key (still valid)";
+  const fence = "```";
+  return i.editReply(`Here's ${kind}:\n${fence}\n${key.key_value}\n${fence}\nPaste it into the ECC00 loader. It locks to the first device that uses it.`);
+}
+
 function freePanel() {
   return {
     embeds: [brand(new EmbedBuilder()).setTitle("ECC00 Free").setThumbnail(LOGO)
@@ -330,7 +349,8 @@ const gateChoices = () => [{ name: "Loader (default)", value: "loader" }, { name
 const buildCmds = () => [
   new SlashCommandBuilder().setName("panel").setDescription("Post a panel").setDefaultMemberPermissions(staff)
     .addStringOption((o) => o.setName("type").setDescription("Which panel").setRequired(true)
-      .addChoices({ name: "Free", value: "free" }, { name: "Paid", value: "paid" })),
+      .addChoices({ name: "Free", value: "free" }, { name: "Paid", value: "paid" }, { name: "Get Key", value: "key" })),
+  new SlashCommandBuilder().setName("key").setDescription("Get your free ECC00 key (paste it in the loader)"),
   new SlashCommandBuilder().setName("games").setDescription("Show every supported game"),
   new SlashCommandBuilder().setName("gamesboard").setDescription("Post a games list that keeps itself up to date").setDefaultMemberPermissions(staff)
     .addChannelOption(chanOpt),
@@ -509,9 +529,13 @@ async function onCommand(i) {
       const name = FEATURES.find((f) => f.value === o.getString("feature")).name;
       return reply(i, { content: `**${name}** is now ${on ? "free for everyone" : "key-only again"}. Takes effect next time the script loads.` });
     }
-    case "panel":
-      await i.channel.send(o.getString("type") === "paid" ? paidPanel() : freePanel());
+    case "panel": {
+      const t = o.getString("type");
+      await i.channel.send(t === "paid" ? paidPanel() : t === "key" ? keyPanel() : freePanel());
       return reply(i, { content: "Panel posted." });
+    }
+    case "key":
+      return giveKey(i);
 
     case "games":
       return i.reply({ embeds: [gamesEmbed()] });
@@ -734,6 +758,7 @@ client.on(Events.InteractionCreate, async (i) => {
     if (i.isChatInputCommand()) return await onCommand(i);
     if (i.isButton() && i.customId.startsWith("paid:")) return await paidButton(i, i.customId.slice(5));
     if (i.isButton() && i.customId.startsWith("ticket:")) return await ticketButton(i, i.customId.slice(7));
+    if (i.isButton() && i.customId === "key:get") return await giveKey(i);
   } catch (e) {
     console.error("interaction:", e.message);
     if (i.isRepliable()) reply(i, { content: "Something broke: " + e.message }).catch(() => {});

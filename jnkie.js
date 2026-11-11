@@ -61,6 +61,26 @@ async function whitelist(discordId, tier, minutes) {
   return key;
 }
 
+// Free key for a Discord member (the "Get Key" button / /key): their premium key if they have one, else a
+// non-premium key for `hours`, one device. The gate refuses free keys older than its freeKeyHours anyway.
+async function freeKey(discordId, hours) {
+  const { keys = [] } = await api("GET", `/keys?discord_id=${discordId}&limit=50`);
+  const live = keys.filter(active).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  const premium = live.find((k) => k.is_premium);
+  if (premium) return { key: premium, fresh: false };
+  const freeOk = live.find((k) => !k.is_premium && Date.parse(k.created_at) + hours * 3600_000 > Date.now());
+  if (freeOk) return { key: freeOk, fresh: false };
+  const { key } = await api("POST", "/keys", {
+    provider_id: PROVIDER_ID,
+    discord_id: String(discordId),
+    key_name: "ECC00 free",
+    is_premium: false,
+    validity_minutes: Math.round(hours * 60),
+    hwid_limit: 1,
+  });
+  return { key, fresh: true };
+}
+
 const unwhitelist = (key) => api("PUT", `/keys/${key.id}`, { is_invalidated: true });
 const resetHwid = (key) => api("POST", `/keys/${key.id}/reset-hwid`);
 const hwidsOf = (key) => key.keys_hwid || key.hwids || [];
@@ -83,4 +103,4 @@ async function unblacklist(key) {
 // Cheap authenticated call, so a bad key shows up as an error instead of "configured".
 const ping = () => api("GET", "/services").then((d) => (d.services || d).length);
 
-module.exports = { ready, ping, keyFor, keyByValue, whitelist, unwhitelist, resetHwid, blacklist, unblacklist, tierOf, active, expired, hwidsOf };
+module.exports = { ready, ping, keyFor, keyByValue, freeKey, whitelist, unwhitelist, resetHwid, blacklist, unblacklist, tierOf, active, expired, hwidsOf };
