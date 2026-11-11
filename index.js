@@ -382,7 +382,7 @@ const buildCmds = () => [
     .addSubcommand((s) => s.setName("mode").setDescription("Key mode for a game, or the loader default")
       .addStringOption((o) => o.setName("target").setDescription("Game, or Loader (default for every game)").setRequired(true).addChoices(...gateChoices()))
       .addStringOption((o) => o.setName("mode").setDescription("Mode").setRequired(true).addChoices(
-        { name: "Keyless", value: "keyless" }, { name: "Discord", value: "discord" }, { name: "Keyed", value: "keyed" }, { name: "Use loader default", value: "default" })))
+        { name: "Keyless", value: "keyless" }, { name: "Discord", value: "discord" }, { name: "Keyed", value: "keyed" }, { name: "Discord + Key", value: "discordkey" }, { name: "Use loader default", value: "default" })))
     .addSubcommand((s) => s.setName("game").setDescription("Turn a game on or off")
       .addStringOption((o) => o.setName("target").setDescription("Game").setRequired(true).addChoices(...gateChoices().slice(1)))
       .addStringOption((o) => o.setName("state").setDescription("On or off").setRequired(true).addChoices({ name: "On", value: "on" }, { name: "Off", value: "off" })))

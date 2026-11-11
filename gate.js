@@ -20,7 +20,7 @@ const jnkie = require("./jnkie");
 const SECRET = process.env.GATE_SECRET || "";
 const TICKET_SECONDS = 120;
 const PHRASE_MINUTES = 15;
-const MODES = ["keyless", "discord", "keyed"];
+const MODES = ["keyless", "discord", "keyed", "discordkey"]; // discordkey = Discord verify AND a key
 
 const links = new Map(); // robloxId -> { discordId, hwid, msg }
 const lastSeen = new Map(); // robloxId -> { discordId, tier } of their last allowed launch (key or link), for the logs
@@ -189,7 +189,8 @@ async function session(client, b) {
     profile = await profileOf(client, k.discord_id);
   }
 
-  if (mode === "discord" && !keyed) {
+  // discord: verify OR a key. discordkey: verify AND a key (ScriptBlox testers still skip verify)
+  if ((mode === "discord" && !keyed) || (mode === "discordkey" && !tester)) {
     const link = links.get(robloxId);
     if (!link || link.hwid !== hwid) {
       const phrase = phraseFor(robloxId, hwid);
@@ -199,7 +200,7 @@ async function session(client, b) {
     }
     profile = await profileOf(client, link.discordId);
   }
-  if (mode === "keyed" && !keyed) return { ok: false, need: "key", getKey: s.getKeyUrl || null, reason: "This game needs a key.", ...about };
+  if ((mode === "keyed" || mode === "discordkey") && !keyed) return { ok: false, need: "key", getKey: s.getKeyUrl || null, reason: "This game needs a key.", ...about };
   const premium = tier !== "free" || Boolean(store.data.freePremium[game.key]);
   if (game.paid && !premium) return { ok: false, need: "key", getKey: s.getKeyUrl || null, reason: `${game.name} needs a premium key.`, ...about };
 

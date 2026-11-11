@@ -8,6 +8,7 @@ const gate = require("./gate");
 const KEYS = {
   "PREMIUMKEY1": { key_value: "PREMIUMKEY1", is_premium: true, key_name: "ECC00 premium", discord_id: "42", created_at: new Date().toISOString() },
   "FREEKEY0001": { key_value: "FREEKEY0001", is_premium: false, created_at: new Date().toISOString() },
+  "FREEKEY0002": { key_value: "FREEKEY0002", is_premium: false, created_at: new Date().toISOString() },
   "OLDFREEKEY1": { key_value: "OLDFREEKEY1", is_premium: false, created_at: new Date(Date.now() - 48 * 3600e3).toISOString() },
 };
 jnkie.keyByValue = async (v) => KEYS[v] || null;
@@ -70,6 +71,14 @@ const ask = (o) => gate.session(client, { robloxId: "1", hwid: "pc-a", placeId: 
   s.testerCode = null;
   assert.equal((await ask({ robloxId: "90", hwid: "pc-x", key: "testercode123" })).need, "key", "old code stops once cleared");
 
+  // discordkey: Discord verify AND a key, in that order
+  s.modes.ftf = "discordkey";
+  r = await ask({ robloxId: "50", hwid: "pc-k", key: "FREEKEY0002" });
+  assert.equal(r.need, "discord", "a key alone isn't enough");
+  await gate.onMessage({ author: { id: "8", bot: false }, channelId: "chan", content: r.phrase, delete: async () => {}, channel: { send: async () => null } });
+  assert.equal((await ask({ robloxId: "50", hwid: "pc-k" })).need, "key", "verified but no key still needs a key");
+  r = await ask({ robloxId: "50", hwid: "pc-k", key: "FREEKEY0002" });
+  assert.ok(r.ok && r.profile.username === "owner8", "verified + key gets in");
   s.off.ftf = true;
   assert.match((await ask({ key: "PREMIUMKEY1" })).reason, /turned off/);
   console.log("gate ok");
