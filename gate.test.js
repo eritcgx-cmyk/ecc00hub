@@ -79,6 +79,7 @@ const ask = (o) => gate.session(client, { robloxId: "1", hwid: "pc-a", placeId: 
   assert.equal((await ask({ robloxId: "50", hwid: "pc-k" })).need, "key", "verified but no key still needs a key");
   r = await ask({ robloxId: "50", hwid: "pc-k", key: "FREEKEY0002" });
   assert.ok(r.ok && r.profile.username === "owner8", "verified + key gets in");
+  assert.ok(r.premium && r.tier === "free", "discordkey: a free key unlocks every feature");
   s.off.ftf = true;
   assert.match((await ask({ key: "PREMIUMKEY1" })).reason, /turned off/);
   console.log("gate ok");
