@@ -196,7 +196,7 @@ async function session(client, b) {
       const phrase = phraseFor(robloxId, hwid);
       pending.set(phrase, { robloxId, hwid, exp: Date.now() + PHRASE_MINUTES * 60_000 });
       const ch = s.verifyChannel && client.channels.cache.get(s.verifyChannel);
-      return { ok: false, need: "discord", phrase, channel: ch ? `#${ch.name}` : "#verify", ...about };
+      return { ok: false, need: "discord", phrase, channel: ch ? `#${ch.name}` : "#verify", getKey: s.getKeyUrl || null, ...about };
     }
     profile = await profileOf(client, link.discordId);
   }
