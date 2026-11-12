@@ -201,8 +201,8 @@ async function session(client, b) {
     profile = await profileOf(client, link.discordId);
   }
   if ((mode === "keyed" || mode === "discordkey") && !keyed) return { ok: false, need: "key", getKey: s.getKeyUrl || null, reason: "This game needs a key.", ...about };
-  // discordkey: every key holder (free keys too) gets every feature
-  const premium = tier !== "free" || Boolean(store.data.freePremium[game.key]) || (mode === "discordkey" && keyed);
+  // discordkey: every key holder (free keys too) gets every feature, except FTF: its premium needs a premium key
+  const premium = tier !== "free" || Boolean(store.data.freePremium[game.key]) || (mode === "discordkey" && keyed && game.key !== "ftf");
   if (game.paid && !premium) return { ok: false, need: "key", getKey: s.getKeyUrl || null, reason: `${game.name} needs a premium key.`, ...about };
 
   if (profile) lastSeen.set(robloxId, { discordId: profile.id, tier });

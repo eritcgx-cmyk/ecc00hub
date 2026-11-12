@@ -15,6 +15,7 @@ jnkie.keyByValue = async (v) => KEYS[v] || null;
 const client = { users: { fetch: async (id) => ({ username: "owner" + id, displayAvatarURL: () => "pfp" }) }, channels: { cache: new Map() } };
 gate._setForTest({ send: async () => ({ delete: async () => {} }) }, [
   { key: "ftf", name: "Flee the Facility", file: "ftf.lua", places: [893973440] },
+  { key: "mm2", name: "Murder Mystery 2", file: "mm2.lua", places: [142823291] },
   { key: "da_hood", name: "Da Hood", file: "dahood.lua", places: [2788229376], paid: true },
 ]);
 const s = gate.settings();
@@ -79,7 +80,10 @@ const ask = (o) => gate.session(client, { robloxId: "1", hwid: "pc-a", placeId: 
   assert.equal((await ask({ robloxId: "50", hwid: "pc-k" })).need, "key", "verified but no key still needs a key");
   r = await ask({ robloxId: "50", hwid: "pc-k", key: "FREEKEY0002" });
   assert.ok(r.ok && r.profile.username === "owner8", "verified + key gets in");
-  assert.ok(r.premium && r.tier === "free", "discordkey: a free key unlocks every feature");
+  assert.ok(!r.premium && r.tier === "free", "FTF: a free key gets the regular script, not FTF premium");
+  s.modes.mm2 = "discordkey";
+  r = await ask({ robloxId: "50", hwid: "pc-k", key: "FREEKEY0002", placeId: "142823291" });
+  assert.ok(r.ok && r.premium && r.tier === "free", "MM2: a free key still unlocks every feature");
   s.off.ftf = true;
   assert.match((await ask({ key: "PREMIUMKEY1" })).reason, /turned off/);
   console.log("gate ok");
