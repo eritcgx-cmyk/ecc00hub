@@ -15,6 +15,7 @@ const allGames = () => [...BASE_GAMES.filter((g) => !store.data.removed.includes
 const jnkie = require("./jnkie");
 const tracker = require("./tracker");
 const gate = require("./gate");
+const changelog = require("./changelog");
 
 const { DISCORD_BOT_TOKEN, PORT = 10000 } = process.env;
 const PUBLIC_URL = (process.env.PUBLIC_URL || "").replace(/\/$/, ""); // this service's own https url
@@ -61,6 +62,8 @@ app.get("/api/tier/:discordId", async (req, res) => {
     res.status(502).json({ error: e.message });
   }
 });
+// In-game Info tab: this game's latest update posts (newest first). Public, read-only.
+app.get("/api/changelog/:game", (req, res) => res.json(changelog.get(String(req.params.game)).slice(0, 10)));
 // Free (universal loader) scripts ask this on load: has staff made this script's premium features free?
 app.get("/api/free/:script", (req, res) => res.json({
   free: Boolean(store.data.freePremium[req.params.script]),
@@ -436,6 +439,10 @@ function updateEmbed(key, version, type, get) {
     from: store.data.versions[key], to: v, rows, extra: [["ECC00 Private", priv]],
   }).setThumbnail(LOGO);
   store.data.versions[key] = v; // next /update for this game shows "this -> new"
+  // the in-game Info tab shows this too (GET /api/changelog/<key>)
+  changelog.add(key, { v, type: type === "release" ? "Release" : "Update", date: new Date().toISOString().slice(0, 10),
+    added: lines(get("added") || ""), improved: lines(get("improved") || ""), fixed: lines(get("fixed") || ""), removed: lines(get("removed") || "") })
+    .catch((e) => console.error("changelog save:", e.message));
   store.save().catch(() => {});
   return e;
 }
@@ -755,6 +762,7 @@ async function verifySticky() {
 client.once(Events.ClientReady, async () => {
   console.log(`[+] ECC00 bot online as ${client.user.tag}`);
   try { await store.load(client); } catch (e) { console.error("store load:", e.message); }
+  try { await changelog.load(client); } catch (e) { console.error("changelog load:", e.message); }
   try { await gate.load(client); } catch (e) { console.error("gate load:", e.message); }
   await registerCommands();
   applyStatus();
