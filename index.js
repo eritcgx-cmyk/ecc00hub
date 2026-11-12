@@ -64,6 +64,11 @@ app.get("/api/tier/:discordId", async (req, res) => {
 });
 // In-game Info tab: this game's latest update posts (newest first). Public, read-only.
 app.get("/api/changelog/:game", (req, res) => res.json(changelog.get(String(req.params.game)).slice(0, 10)));
+// In-game cloud notifications for this game (plus ones for every game). Read-only; the UI checks once a minute.
+app.get("/api/notices/:game", (req, res) => {
+  if (limited(req, "notices", 30, 60_000)) return res.status(429).json([]);
+  res.json(changelog.notices(String(req.params.game)));
+});
 // Free (universal loader) scripts ask this on load: has staff made this script's premium features free?
 app.get("/api/free/:script", (req, res) => res.json({
   free: Boolean(store.data.freePremium[req.params.script]),
@@ -153,6 +158,9 @@ app.post("/api/admin", express.json({ limit: "4kb" }), async (req, res) => {
     g.getKeyUrl = value || null;
   } else if (action === "tester") { // a new code replaces the old one right away
     g.testerCode = value === "off" ? null : require("crypto").randomBytes(24).toString("hex");
+  } else if (action === "notify") { // value: { text, game }
+    const n = await changelog.notify((value || {}).text, (value || {}).game);
+    return res.json({ ok: true, notice: n });
   } else if (action === "update") { // value: { game, version, type, added, improved, fixed, removed, private, channel, ping }
     const u = value || {};
     const guild = client.guilds.cache.first();
@@ -361,6 +369,9 @@ const buildCmds = () => [
     .addStringOption((o) => o.setName("removed").setDescription("[-] Removed, separated by ; or \\n"))
     .addStringOption((o) => o.setName("private").setDescription("ECC00 Private-only additions, separated by ; or \\n"))
     .addChannelOption(chanOpt).addStringOption(pingOpt),
+  new SlashCommandBuilder().setName("notify").setDescription("Send an in-game notification to everyone running ECC00").setDefaultMemberPermissions(staff)
+    .addStringOption((o) => o.setName("message").setDescription("Plain text, up to 200 characters").setRequired(true).setMaxLength(200))
+    .addStringOption((o) => o.setName("game").setDescription("Only players in this game (default: everyone)").addChoices(...gameChoices(), { name: "Universal", value: "universal" })),
   new SlashCommandBuilder().setName("embed").setDescription("Build and post a custom embed").setDefaultMemberPermissions(staff)
     .addStringOption((o) => o.setName("description").setDescription("Text (use \\n for new lines)").setRequired(true))
     .addStringOption((o) => o.setName("title").setDescription("Title"))
@@ -442,6 +453,7 @@ function updateEmbed(key, version, type, get) {
   // the in-game Info tab shows this too (GET /api/changelog/<key>)
   changelog.add(key, { v, type: type === "release" ? "Release" : "Update", date: new Date().toISOString().slice(0, 10),
     added: lines(get("added") || ""), improved: lines(get("improved") || ""), fixed: lines(get("fixed") || ""), removed: lines(get("removed") || "") })
+    .then(() => changelog.notify(`${name} v${v} is out. See the Changelog in the Info tab.`, key))
     .catch((e) => console.error("changelog save:", e.message));
   store.save().catch(() => {});
   return e;
@@ -566,6 +578,10 @@ async function onCommand(i) {
       return post(i, e);
     }
 
+    case "notify": {
+      const n = await changelog.notify(o.getString("message"), o.getString("game"));
+      return reply(i, { content: `Sent in-game${n.game ? ` to ${n.game} players` : " to everyone"}: ${n.text}` });
+    }
     case "update": {
       const e = updateEmbed(o.getString("game"), o.getString("version"), o.getString("type"), (k) => o.getString(k));
       if (!e) return reply(i, { content: "Add at least one change (added, improved, fixed, removed or private)." });
