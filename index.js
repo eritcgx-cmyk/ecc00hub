@@ -26,14 +26,26 @@ const EMBED = 0x0b0b0b; // near-black; Discord treats 0x000000 as "no colour"
 const app = express();
 app.use(express.static(path.join(__dirname, "public")));
 app.get("/health", (_req, res) => res.json({ ok: true, bot: client?.isReady?.() || false, jnkie: jnkie.ready() }));
-// The in-game UI asks this for the profile frame: tier (the badge), Discord name and avatar. JNKIE only hands
-// the script a Discord *ID* for keys made with /whitelist, so the bot resolves the name/avatar itself.
-// Never returns the key, and only returns a profile for someone with an active key.
+// Per-IP attempt limiter: true once this IP has used `max` tries within `ms`.
+// ponytail: in-memory and cleared when it gets big; a restart resets it, fine for guess-limiting.
+const buckets = new Map();
+function limited(req, name, max, ms) {
+  const ip = String(req.headers["x-forwarded-for"] || req.ip).split(",")[0];
+  const k = name + ":" + ip, now = Date.now(), b = buckets.get(k);
+  if (buckets.size > 50_000) buckets.clear();
+  if (!b || now - b.start > ms) { buckets.set(k, { start: now, n: 1 }); return false; }
+  return ++b.n > max;
+}
+// The in-game UI asks this for the profile frame: tier (the badge), Discord name and avatar.
+// Only answers for the Roblox account (?r=) that just launched through the gate as this Discord user, so nobody
+// can look up whether some other Discord user bought premium. Never returns the key.
 // ponytail: 60s in-memory cache per user; plenty for one lookup per script launch.
 const tierCache = new Map();
 app.get("/api/tier/:discordId", async (req, res) => {
   const id = req.params.discordId;
   if (!/^\d{5,25}$/.test(id)) return res.status(400).json({ error: "bad id" });
+  if (limited(req, "tier", 30, 60_000)) return res.status(429).json({ error: "slow down" });
+  if (gate.lastSeen.get(String(req.query.r || ""))?.discordId !== id) return res.status(403).json({ error: "launch through the loader first" });
   const hit = tierCache.get(id);
   if (hit && Date.now() - hit.at < 60_000) return res.json(hit.body);
   try {
@@ -44,28 +56,6 @@ app.get("/api/tier/:discordId", async (req, res) => {
       if (user) Object.assign(body, { username: user.globalName || user.username, avatar: avatar(user) });
     }
     tierCache.set(id, { at: Date.now(), body });
-    res.json(body);
-  } catch (e) {
-    res.status(502).json({ error: e.message });
-  }
-});
-// Free scripts (MM2...) ask this with the key the user ran them with, to unlock premium options and show the
-// Discord profile on that key. Answers only for a valid key, and never echoes the key back.
-const keyCache = new Map();
-app.get("/api/key/:key", async (req, res) => {
-  const value = req.params.key;
-  if (!/^[\w-]{8,100}$/.test(value)) return res.status(400).json({ error: "bad key" });
-  const hit = keyCache.get(value);
-  if (hit && Date.now() - hit.at < 60_000) return res.json(hit.body);
-  try {
-    const key = await jnkie.keyByValue(value);
-    const body = { active: jnkie.active(key), tier: key ? jnkie.tierOf(key) : null };
-    if (body.active && key.discord_id) {
-      body.discordId = key.discord_id;
-      const user = await client.users.fetch(key.discord_id).catch(() => null);
-      if (user) Object.assign(body, { username: user.globalName || user.username, avatar: avatar(user) });
-    }
-    keyCache.set(value, { at: Date.now(), body });
     res.json(body);
   } catch (e) {
     res.status(502).json({ error: e.message });
@@ -775,7 +765,7 @@ client.once(Events.ClientReady, async () => {
   setInterval(() => verifySticky().catch((e) => console.error("verify sticky:", e.message)), 10 * 60_000);
 });
 
-require("./spotify")(app, express); // Spotify addon: /spotify login, /api/spotify/*
+require("./spotify")(app, express, limited); // Spotify addon: /spotify login, /api/spotify/*
 require("./skins")(app, express, client); // MM2 spoofer skin library: /api/mm2/skins
 app.listen(PORT, () => console.log(`[+] web on :${PORT}`));
 

@@ -85,7 +85,7 @@ async function findLyrics(it) {
 
 const sha = (v) => crypto.createHash("sha256").update(String(v)).digest("hex");
 
-module.exports = function mount(app, express) {
+module.exports = function mount(app, express, limited) {
   const states = new Map(); // oauth state -> expiry
   const codes = new Map(); // 6-digit code -> { token, name, premium, exp }
   const access = new Map(); // sha(token) -> { at, exp }
@@ -161,6 +161,8 @@ module.exports = function mount(app, express) {
   });
 
   app.post("/api/spotify/link", express.json({ limit: "1kb" }), (req, res) => {
+    // 5 tries per 10 min per IP: a 6-digit code can't be guessed before it expires
+    if (limited(req, "spotify-link", 5, 10 * 60_000)) return res.status(429).json({ ok: false, error: "Too many tries. Wait 10 minutes, then try again." });
     const code = String(req.body?.code || "").replace(/\D/g, "");
     const hit = codes.get(code);
     if (!hit || hit.exp < Date.now()) return res.json({ ok: false, error: "That code is wrong or expired. Get a new one at eccohub.xyz/spotify" });
