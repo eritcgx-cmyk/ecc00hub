@@ -34,6 +34,7 @@ const settings = () => {
   // game key -> where that game's protected build lives (Panda Vault or a JNKIE loader).
   // Kept here rather than in this public repo.
   store.data.gate.build ||= store.data.gate.panda || {};
+  delete store.data.gate.panda; // old name of build; only ever read by the line above
   return store.data.gate;
 };
 

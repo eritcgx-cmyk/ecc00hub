@@ -1,11 +1,23 @@
 // Bot settings that must survive deploys (Render's disk is wiped on every deploy): one JSON message in a private
 // #ecc00-data channel the bot creates for itself.
-const { ChannelType, PermissionFlagsBits } = require("discord.js");
+const { ChannelType, PermissionFlagsBits, AttachmentBuilder } = require("discord.js");
 
 const data = { games: [], removed: [], freePremium: {}, freeFeatures: {}, versions: {}, logChannel: null, gamesBoard: null };
 let msg = null;
 
+const FILE = "data.json";
 const render = () => "```json\n" + JSON.stringify(data) + "\n```";
+// a message holds 2000 chars; past that the JSON rides along as an attachment (editing would throw and take the bot down)
+function payload() {
+  const text = render();
+  if (text.length <= 2000) return { content: text, files: [], attachments: [] };
+  return { content: "ECC00 bot storage (attached). Don't delete.", files: [new AttachmentBuilder(Buffer.from(JSON.stringify(data)), { name: FILE })], attachments: [] };
+}
+const isStore = (m, botId) => m.author.id === botId && (m.content.startsWith("```json") || m.attachments.some((a) => a.name === FILE));
+async function read(m) {
+  const a = m.attachments.find((x) => x.name === FILE);
+  return a ? JSON.parse(await (await fetch(a.url)).text()) : JSON.parse(m.content.slice(8, -4));
+}
 
 async function load(client) {
   const guild = client.guilds.cache.first();
@@ -21,13 +33,13 @@ async function load(client) {
     });
   }
   const recent = await ch.messages.fetch({ limit: 20 });
-  msg = recent.find((m) => m.author.id === client.user.id && m.content.startsWith("```json"));
-  if (msg) Object.assign(data, JSON.parse(msg.content.slice(8, -4)));
-  else msg = await ch.send(render());
+  msg = recent.find((m) => isStore(m, client.user.id));
+  if (msg) Object.assign(data, await read(msg));
+  else msg = await ch.send(payload());
 }
 
 async function save() {
-  if (msg) await msg.edit(render());
+  if (msg) await msg.edit(payload());
 }
 
-module.exports = { data, load, save };
+module.exports = { data, load, save, _test: { payload, read, isStore } };
