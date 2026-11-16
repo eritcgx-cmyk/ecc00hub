@@ -32,6 +32,7 @@ module.exports = function (app, express, client) {
   let skins = {};
   let msg = null;
   let dirty = false;
+  let loaded = false; // a failed load must never be saved over the real library
   const lastPost = new Map(); // ip -> time
 
   async function channel() {
@@ -40,15 +41,18 @@ module.exports = function (app, express, client) {
   }
   async function load() {
     const ch = await channel();
-    if (!ch) return;
+    if (!ch) return (loaded = true);
     const recent = await ch.messages.fetch({ limit: 30 });
     msg = recent.find((m) => m.author.id === client.user.id && m.attachments.some((a) => a.name === FILE));
-    if (!msg) return;
-    const res = await fetch(msg.attachments.find((a) => a.name === FILE).url);
-    if (res.ok) skins = await res.json();
+    if (msg) {
+      const res = await fetch(msg.attachments.find((a) => a.name === FILE).url);
+      if (!res.ok) throw new Error(`library download ${res.status}`);
+      skins = await res.json();
+    }
+    loaded = true;
   }
   async function save() {
-    if (!dirty) return;
+    if (!dirty || !loaded) return;
     dirty = false;
     const file = new AttachmentBuilder(Buffer.from(JSON.stringify(skins)), { name: FILE });
     if (msg) await msg.edit({ content: "MM2 skin library (ECC00 spoofer). Don't delete.", files: [file], attachments: [] });
