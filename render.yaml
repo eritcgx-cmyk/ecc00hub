@@ -19,5 +19,9 @@ services:
         sync: false
       - key: PUBLIC_URL
         sync: false   # set to this service's https url once created, e.g. https://ecc00hub.onrender.com
+      - key: VERBA_API_KEY
+        sync: false   # verba.ink Settings > Security > API Keys (Pro/Ultra plan)
+      - key: VERBA_CHARACTER
+        sync: false   # the Verb's slug, e.g. ecc00
       - key: HUB_LOADER
         value: https://eccohub.xyz/loader.lua
