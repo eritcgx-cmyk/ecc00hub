@@ -16,7 +16,6 @@ const jnkie = require("./jnkie");
 const tracker = require("./tracker");
 const gate = require("./gate");
 const changelog = require("./changelog");
-const verba = require("./verba");
 
 const { DISCORD_BOT_TOKEN, PORT = 10000 } = process.env;
 const PUBLIC_URL = (process.env.PUBLIC_URL || "").replace(/\/$/, ""); // this service's own https url
@@ -741,7 +740,6 @@ async function ticketButton(i, action) {
 }
 
 client.on(Events.MessageCreate, (m) => gate.onMessage(m).catch((e) => console.error("verify:", e.message)));
-client.on(Events.MessageCreate, (m) => verba.onMessage(m, client, gate.settings().verifyChannel).catch((e) => console.error("verba:", e.message)));
 client.on(Events.GuildMemberRemove, gate.onLeave);
 
 client.on(Events.InteractionCreate, async (i) => {
