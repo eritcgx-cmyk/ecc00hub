@@ -156,6 +156,14 @@ app.post("/api/admin", express.json({ limit: "4kb" }), async (req, res) => {
   } else if (action === "getkey") {
     if (value && !/^https:\/\/\S+$/.test(value)) return res.status(400).json({ error: "link must start with https://" });
     g.getKeyUrl = value || null;
+  } else if (action === "restore") { // value: { build: {game: url}, verifyChannel, versions: {game: v} } — refill lost settings
+    const v = value || {};
+    for (const [k, u] of Object.entries(v.build || {})) {
+      if (!/^https:\/\/(vault\.pandauth\.com|api\.jnkie\.com)\/\S+$/.test(u)) return res.status(400).json({ error: `bad build link for ${k}` });
+      g.build[k] = u;
+    }
+    if (v.verifyChannel) { if (!/^\d{17,20}$/.test(v.verifyChannel)) return res.status(400).json({ error: "bad channel id" }); g.verifyChannel = v.verifyChannel; }
+    Object.assign(store.data.versions, v.versions || {});
   } else if (action === "tester") { // a new code replaces the old one right away
     g.testerCode = value === "off" ? null : require("crypto").randomBytes(24).toString("hex");
   } else if (action === "notify") { // value: { text, game }
