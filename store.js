@@ -4,6 +4,8 @@ const { ChannelType, PermissionFlagsBits, AttachmentBuilder } = require("discord
 
 const data = { games: [], removed: [], freePremium: {}, freeFeatures: {}, versions: {}, logChannel: null, gamesBoard: null };
 let msg = null;
+// the home server is the one with #ecc00-data: if the bot is ever added to a second server, data still loads from here
+const home = (client) => client.guilds?.cache.find((g) => g.channels.cache.some((c) => c.name === "ecc00-data")) || client.guilds?.cache.first();
 
 const FILE = "data.json";
 const render = () => "```json\n" + JSON.stringify(data) + "\n```";
@@ -34,7 +36,7 @@ async function pick(msgs) {
 }
 
 async function load(client) {
-  const guild = client.guilds.cache.first();
+  const guild = home(client);
   if (!guild) return;
   let ch = guild.channels.cache.find((c) => c.name === "ecc00-data" && c.type === ChannelType.GuildText);
   if (!ch) {
@@ -64,4 +66,4 @@ async function save() {
   await msg.edit(payload());
 }
 
-module.exports = { data, load, save, _test: { payload, read, isStore, pick } };
+module.exports = { data, load, save, home, _test: { payload, read, isStore, pick } };

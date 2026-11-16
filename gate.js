@@ -40,7 +40,7 @@ const settings = () => {
 
 // ---------------------------------------------------------------- storage
 async function load(client) {
-  const guild = client.guilds.cache.first();
+  const guild = store.home(client);
   if (!guild) return;
   dbChannel = guild.channels.cache.find((c) => c.name === "ecc00-db" && c.type === ChannelType.GuildText);
   if (!dbChannel) {
@@ -128,7 +128,7 @@ function phraseFor(robloxId, hwid) {
 
 // No verify channel set yet: use one called "verify", or make it (everyone can type, the bot cleans up).
 async function ensureVerifyChannel(client) {
-  const guild = client.guilds?.cache.first();
+  const guild = store.home(client);
   if (!guild) return;
   let ch = guild.channels.cache.find((c) => c.name === "verify" && c.type === ChannelType.GuildText);
   if (!ch) {
@@ -195,6 +195,7 @@ async function session(client, b) {
     const link = links.get(robloxId);
     if (!link || link.hwid !== hwid) {
       const phrase = phraseFor(robloxId, hwid);
+      if (pending.size > 5000) for (const [k, v] of pending) if (v.exp < Date.now()) pending.delete(k); // spam can't grow it forever
       pending.set(phrase, { robloxId, hwid, exp: Date.now() + PHRASE_MINUTES * 60_000 });
       const ch = s.verifyChannel && client.channels.cache.get(s.verifyChannel);
       return { ok: false, need: "discord", phrase, channel: "#" + ((ch && ch.name.normalize("NFKC").replace(/[^ -~]/g, "")) || "verify"), getKey: s.getKeyUrl || null, ...about };

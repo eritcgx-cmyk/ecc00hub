@@ -36,7 +36,7 @@ module.exports = function (app, express, client) {
   const lastPost = new Map(); // ip -> time
 
   async function channel() {
-    const guild = client.guilds.cache.first();
+    const guild = require("./store").home(client);
     return guild && guild.channels.cache.find((c) => c.name === "ecc00-data" && c.type === ChannelType.GuildText);
   }
   async function load() {

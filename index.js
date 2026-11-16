@@ -167,7 +167,7 @@ app.post("/api/admin", express.json({ limit: "4kb" }), async (req, res) => {
     if (v.testerCode) { if (!/^[a-f0-9]{48}$/.test(v.testerCode)) return res.status(400).json({ error: "bad tester code" }); g.testerCode = v.testerCode; }
     const byName = (n) => { // "games" matches "╠➣〢🧩〢games"
       const plain = (s) => String(s || "").normalize("NFKC").toLowerCase().replace(/[^a-z0-9]/g, "");
-      return [...(client.guilds.cache.first()?.channels.cache.values() || [])].find((c) => c.isTextBased() && plain(c.name) === plain(n));
+      return [...(store.home(client)?.channels.cache.values() || [])].find((c) => c.isTextBased() && plain(c.name) === plain(n));
     };
     if (v.logChannel) { const c = byName(v.logChannel); if (!c) return res.status(400).json({ error: "log channel not found" }); store.data.logChannel = c.id; }
     if (v.gamesBoard) {
@@ -182,7 +182,7 @@ app.post("/api/admin", express.json({ limit: "4kb" }), async (req, res) => {
     return res.json({ ok: true, notice: n });
   } else if (action === "update") { // value: { game, version, type, added, improved, fixed, removed, private, channel, ping }
     const u = value || {};
-    const guild = client.guilds.cache.first();
+    const guild = store.home(client);
     const plain = (n) => String(n || "").normalize("NFKC").toLowerCase().replace(/[^a-z0-9]/g, ""); // "📢・updates" matches "updates"
     const want = plain(u.channel);
     const text = guild ? [...guild.channels.cache.values()].filter((c) => c.isTextBased() && !c.isThread?.()) : [];
@@ -779,7 +779,8 @@ async function verifySticky() {
   if (!g.verifyChannel || !g.getKeyUrl) return;
   const ch = client.channels.cache.get(g.verifyChannel) || await client.channels.fetch(g.verifyChannel).catch(() => null);
   if (!ch) return;
-  if (store.data.verifySticky) await ch.messages.delete(store.data.verifySticky).catch(() => {});
+  const recent = await ch.messages.fetch({ limit: 30 }).catch(() => null);
+  for (const m of recent?.values() || []) if (m.author.id === client.user.id && m.embeds[0]?.title === "Get your ECC00 key") await m.delete().catch(() => {});
   const msg = await ch.send({
     embeds: [brand(new EmbedBuilder()).setTitle("Get your ECC00 key").setThumbnail(LOGO)
       .setDescription([

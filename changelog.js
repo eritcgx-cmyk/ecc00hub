@@ -9,7 +9,7 @@ let msg = null;
 let logs = {}; // update key (ftf, mm2, sols...) -> [{ v, type, date, added, improved, fixed, removed }], newest first
 
 async function load(client) {
-  const guild = client.guilds.cache.first();
+  const guild = require("./store").home(client);
   const ch = guild && guild.channels.cache.find((c) => c.name === "ecc00-data");
   if (!ch) return;
   const recent = await ch.messages.fetch({ limit: 20 });
