@@ -153,6 +153,10 @@ app.post("/api/admin", express.json({ limit: "4kb" }), async (req, res) => {
   } else if (action === "build") {
     if (value && !/^https:\/\/(vault\.pandauth\.com|api\.jnkie\.com)\/\S+$/.test(value)) return res.status(400).json({ error: "expected a vault.pandauth.com or api.jnkie.com link" });
     if (value) g.build[target] = value; else delete g.build[target];
+  } else if (action === "seal") { // target: a game key or "all"; value on|off
+    if (!/^\w{1,32}$/.test(target || "")) return res.status(400).json({ error: "seal <game|all> <on|off>" });
+    g.sealed ||= {};
+    if (value === "on") g.sealed[target] = true; else delete g.sealed[target];
   } else if (action === "getkey") {
     if (value && !/^https:\/\/\S+$/.test(value)) return res.status(400).json({ error: "link must start with https://" });
     g.getKeyUrl = value || null;
