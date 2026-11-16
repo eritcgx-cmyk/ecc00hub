@@ -164,6 +164,16 @@ app.post("/api/admin", express.json({ limit: "4kb" }), async (req, res) => {
     }
     if (v.verifyChannel) { if (!/^\d{17,20}$/.test(v.verifyChannel)) return res.status(400).json({ error: "bad channel id" }); g.verifyChannel = v.verifyChannel; }
     Object.assign(store.data.versions, v.versions || {});
+    const byName = (n) => { // "games" matches "╠➣〢🧩〢games"
+      const plain = (s) => String(s || "").normalize("NFKC").toLowerCase().replace(/[^a-z0-9]/g, "");
+      return [...(client.guilds.cache.first()?.channels.cache.values() || [])].find((c) => c.isTextBased() && plain(c.name) === plain(n));
+    };
+    if (v.logChannel) { const c = byName(v.logChannel); if (!c) return res.status(400).json({ error: "log channel not found" }); store.data.logChannel = c.id; }
+    if (v.gamesBoard) {
+      const c = byName(v.gamesBoard); if (!c) return res.status(400).json({ error: "games channel not found" });
+      store.data.gamesBoard = { ...store.data.gamesBoard, channel: c.id, sig: null };
+      await refreshBoard().catch(() => {});
+    }
   } else if (action === "tester") { // a new code replaces the old one right away
     g.testerCode = value === "off" ? null : require("crypto").randomBytes(24).toString("hex");
   } else if (action === "notify") { // value: { text, game }
