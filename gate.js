@@ -213,18 +213,10 @@ async function session(client, b) {
     ok: true, mode, tier, premium, profile, game: game.key, name: game.name,
     // Luraph-protected build (Panda Vault or JNKIE), handed over only once the gate has passed
     // ...except JNKIE builds for testers: JNKIE only takes real JNKIE keys, so testers get the sealed Blob copy
-    // ...and sealed Panda games never get their link at all: eccohub.xyz/api/load serves its private copy for the ticket
-    build: buildFor(s, game.key, tester),
+    build: (tester && /api\.jnkie\.com/.test(s.build[game.key] || "")) ? null : (s.build[game.key] || null),
     // ff: premium features staff made free (/freefeature); /api/load serves those modules to this ticket too
     ticket: ticket({ g: game.key, f: game.file, p: premium ? 1 : 0, r: robloxId, ff: (store.data.freeFeatures || {})[game.key] || [] }),
   };
-}
-
-function buildFor(s, key, tester) {
-  const link = s.build[key] || null;
-  const isJnkie = /^https:\/\/api\.jnkie\.com\//.test(link || "");
-  if (isJnkie) return tester ? null : link; // JNKIE checks its own key, so its link is safe to hand out
-  return s.sealed?.[key] || s.sealed?.all ? null : link;
 }
 
 // ---------------------------------------------------------------- Discord side
@@ -252,4 +244,4 @@ const gameList = () => [...games.byKey.values()];
 // gate.test.js swaps in a fake db channel and game list
 const _setForTest = (db, list) => { dbChannel = db; games = { byPlace: new Map(list.flatMap((g) => g.places.map((p) => [String(p), g]))), byKey: new Map(list.map((g) => [g.key, g])) }; };
 
-module.exports = { buildFor, _setForTest, load, session, onMessage, onLeave, settings, resetBind, dropLinksOf, refreshGames, gameList, links, lastSeen, MODES };
+module.exports = { _setForTest, load, session, onMessage, onLeave, settings, resetBind, dropLinksOf, refreshGames, gameList, links, lastSeen, MODES };

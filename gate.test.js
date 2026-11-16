@@ -88,16 +88,3 @@ const ask = (o) => gate.session(client, { robloxId: "1", hwid: "pc-a", placeId: 
   assert.match((await ask({ key: "PREMIUMKEY1" })).reason, /turned off/);
   console.log("gate ok");
 })().catch((e) => { console.error(e); process.exit(1); });
-
-// sealed Panda games never hand out their link; JNKIE links still go out (except to testers)
-{
-  const { buildFor } = require("./gate");
-  const s = { build: { mm2: "https://vault.pandauth.com/vss/a", da_hood: "https://api.jnkie.com/x" }, sealed: { mm2: true } };
-  const a = require("assert");
-  a.strictEqual(buildFor(s, "mm2", false), null, "sealed Panda game hides its link");
-  a.strictEqual(buildFor({ ...s, sealed: {} }, "mm2", false), "https://vault.pandauth.com/vss/a", "unsealed still gets it");
-  a.strictEqual(buildFor({ ...s, sealed: { all: true } }, "mm2", false), null, "seal all");
-  a.strictEqual(buildFor(s, "da_hood", false), "https://api.jnkie.com/x", "JNKIE link still handed out");
-  a.strictEqual(buildFor(s, "da_hood", true), null, "testers skip JNKIE");
-  console.log("seal ok");
-}
