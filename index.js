@@ -164,6 +164,7 @@ app.post("/api/admin", express.json({ limit: "4kb" }), async (req, res) => {
     }
     if (v.verifyChannel) { if (!/^\d{17,20}$/.test(v.verifyChannel)) return res.status(400).json({ error: "bad channel id" }); g.verifyChannel = v.verifyChannel; }
     Object.assign(store.data.versions, v.versions || {});
+    if (v.testerCode) { if (!/^[a-f0-9]{48}$/.test(v.testerCode)) return res.status(400).json({ error: "bad tester code" }); g.testerCode = v.testerCode; }
     const byName = (n) => { // "games" matches "╠➣〢🧩〢games"
       const plain = (s) => String(s || "").normalize("NFKC").toLowerCase().replace(/[^a-z0-9]/g, "");
       return [...(client.guilds.cache.first()?.channels.cache.values() || [])].find((c) => c.isTextBased() && plain(c.name) === plain(n));
