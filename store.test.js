@@ -13,10 +13,16 @@ const { payload, read, isStore } = store._test;
   p = payload();
   assert.ok(p.content.length < 2000 && p.files.length === 1, "big data goes into an attachment");
   const json = p.files[0].attachment.toString();
-  global.fetch = async () => ({ text: async () => json });
+  global.fetch = async () => ({ ok: true, text: async () => json });
   const att = [{ name: "data.json", url: "x" }];
   const msg = { author: { id: "bot" }, content: p.content, attachments: att };
   assert.ok(isStore(msg, "bot"), "attachment message is still found on load");
   assert.equal((await read(msg)).versions.game199, "1.199", "and reads back");
+
+  // load picks the fullest copy, and a failed read throws instead of handing back defaults
+  const small = { author: { id: "bot" }, content: '```json\n{"games":[]}\n```', attachments: [] };
+  assert.equal((await store._test.pick([small, msg])).m, msg, "fullest copy wins");
+  global.fetch = async () => ({ ok: false, status: 403, text: async () => "<html>" });
+  await assert.rejects(store._test.pick([msg]), /403/, "bad attachment read throws");
   console.log("store ok");
 })().catch((e) => { console.error(e); process.exit(1); });

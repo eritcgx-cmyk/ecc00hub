@@ -16,7 +16,21 @@ function payload() {
 const isStore = (m, botId) => m.author.id === botId && (m.content.startsWith("```json") || m.attachments.some((a) => a.name === FILE));
 async function read(m) {
   const a = m.attachments.find((x) => x.name === FILE);
-  return a ? JSON.parse(await (await fetch(a.url)).text()) : JSON.parse(m.content.slice(8, -4));
+  if (!a) return JSON.parse(m.content.slice(8, -4));
+  const r = await fetch(a.url);
+  if (!r.ok) throw new Error(`store attachment ${r.status}`);
+  return JSON.parse(await r.text());
+}
+// newest-first store messages -> the fullest one that reads. Any unreadable one means "don't guess": throw,
+// so msg stays null and save() refuses instead of overwriting real settings with defaults.
+async function pick(msgs) {
+  let best = null, size = -1;
+  for (const m of msgs) {
+    const d = await read(m); // throws on a bad read; the caller keeps the bot from saving
+    const n = JSON.stringify(d).length;
+    if (n > size) { best = { m, d }; size = n; }
+  }
+  return best;
 }
 
 async function load(client) {
@@ -32,14 +46,22 @@ async function load(client) {
       ],
     });
   }
-  const recent = await ch.messages.fetch({ limit: 20 });
-  msg = recent.find((m) => isStore(m, client.user.id));
-  if (msg) Object.assign(data, await read(msg));
+  const found = [];
+  for (let before; found.length < 50;) { // the whole channel, not just the last 20: an old copy may sit further back
+    const page = await ch.messages.fetch({ limit: 100, before });
+    if (!page.size) break;
+    found.push(...page.filter((m) => isStore(m, client.user.id)).values());
+    before = page.last().id;
+  }
+  const best = await pick(found);
+  if (best) { Object.assign(data, best.d); msg = best.m; }
   else msg = await ch.send(payload());
+  console.log(`[store] ${found.length} copies, using ${msg.id}`);
 }
 
 async function save() {
-  if (msg) await msg.edit(payload());
+  if (!msg) throw new Error("settings didn't load, not saving (would wipe them)");
+  await msg.edit(payload());
 }
 
-module.exports = { data, load, save, _test: { payload, read, isStore } };
+module.exports = { data, load, save, _test: { payload, read, isStore, pick } };
