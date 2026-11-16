@@ -105,10 +105,18 @@ app.post("/api/exec", express.json({ limit: "2kb" }), async (req, res) => {
   const seen = gate.lastSeen.get(String(userId));
   const link = gate.links.get(String(userId)) || (seen?.discordId ? seen : null);
   const job = /^[\w-]{8,64}$/.test(String(b.jobId || "")) ? b.jobId : null;
+  // How they actually got in this launch, not the game's configured mode: a key beats a
+  // Discord link (both can be present), and a genuine device-bound link means Discord verify.
+  const verified = gate.links.get(String(userId));
+  const method = seen?.tester ? "Tester code"
+    : b.keyed ? (b.premium ? "Premium key" : "Free key")
+    : verified ? "Discord verify"
+    : b.mode === "keyless" ? "Keyless"
+    : s(b.mode, 20);
   ch.send({ content: store.data.logPing || undefined, allowedMentions: { parse: ["users", "roles"] }, embeds: [brand(new EmbedBuilder()).setTitle("Script Executed").setTimestamp().addFields(
     { name: "Script", value: s(b.script), inline: true },
     { name: "Plan", value: seen?.tester ? "Tester" : b.premium ? "ECC00 Private" : "Free", inline: true },
-    { name: "Key mode", value: s(b.mode, 20), inline: true },
+    { name: "Method", value: method, inline: true },
     { name: "Executor", value: s(b.executor), inline: true },
     { name: "Platform", value: s(b.platform, 20), inline: true },
     { name: "Key used", value: b.keyed ? "Yes" : "No", inline: true },
