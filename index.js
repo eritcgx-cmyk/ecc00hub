@@ -833,11 +833,12 @@ async function verifySticky() {
         "",
         "**Basic**: 1 checkpoint, every free feature.",
         "**Basic+**: 2 checkpoints, Basic plus FTF Auto Farm.",
-        "Both last 24 hours. Compare: https://eccohub.xyz/key",
+        "Both last 24 hours. Press Get Key to pick one.",
       ].join("\n"))],
     components: [new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setLabel("Basic key").setStyle(ButtonStyle.Link).setURL(g.getKeyUrl),
-      ...(g.plusKeyUrl ? [new ButtonBuilder().setLabel("Basic+ key").setStyle(ButtonStyle.Link).setURL(g.plusKeyUrl)] : []),
+      // one Get Key button when both plans share a page (eccohub.xyz/key offers both)
+      new ButtonBuilder().setLabel(g.plusKeyUrl && g.plusKeyUrl !== g.getKeyUrl ? "Basic key" : "Get Key").setStyle(ButtonStyle.Link).setURL(g.getKeyUrl),
+      ...(g.plusKeyUrl && g.plusKeyUrl !== g.getKeyUrl ? [new ButtonBuilder().setLabel("Basic+ key").setStyle(ButtonStyle.Link).setURL(g.plusKeyUrl)] : []),
     )],
   });
   store.data.verifySticky = msg.id;
