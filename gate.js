@@ -206,13 +206,16 @@ async function session(client, b) {
     profile = await profileOf(client, link.discordId);
   }
   if ((mode === "keyed" || mode === "discordkey") && !keyed) return { ok: false, need: "key", getKey: KEY_PAGE, reason: "This game needs a key.", ...about };
-  // discordkey: every key holder (free keys too) gets every feature, except FTF: its premium needs a premium key
-  const premium = tier !== "free" || Boolean(store.data.freePremium[game.key]) || (mode === "discordkey" && keyed && game.key !== "ftf");
+  // discordkey: every key holder (free keys too) gets every feature, except FTF: its premium needs a premium key.
+  // Basic+ is NOT full premium — it only unlocks Auto Farm (the ticket's b flag), so it never sets `premium`.
+  const paidTier = tier !== "free" && tier !== "basic+";
+  const premium = paidTier || Boolean(store.data.freePremium[game.key]) || (mode === "discordkey" && keyed && game.key !== "ftf");
   if (game.paid && !premium) return { ok: false, need: "key", getKey: KEY_PAGE, reason: `${game.name} needs a premium key.`, ...about };
 
-  if (profile) lastSeen.set(robloxId, { discordId: profile.id, tier });
-  else if (tester) lastSeen.set(robloxId, { tester: true, tier });
   const plan = premium ? "ECC00 Private" : tier === "basic+" ? "Basic+" : keyed ? "Basic" : "Keyless";
+  // the exec-log reads these server-side, so a spoofed /api/exec POST can't claim a plan the gate didn't grant
+  if (profile) lastSeen.set(robloxId, { discordId: profile.id, tier, plan, keyed, premium });
+  else if (tester) lastSeen.set(robloxId, { tester: true, tier, plan, keyed, premium });
   return {
     ok: true, mode, tier, plan, premium, profile, game: game.key, name: game.name,
     // Luraph-protected build (Panda Vault or JNKIE), handed over only once the gate has passed

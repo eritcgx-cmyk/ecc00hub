@@ -10,6 +10,7 @@ const KEYS = {
   "FREEKEY0001": { key_value: "FREEKEY0001", is_premium: false, created_at: new Date().toISOString() },
   "FREEKEY0002": { key_value: "FREEKEY0002", is_premium: false, created_at: new Date().toISOString() },
   "OLDFREEKEY1": { key_value: "OLDFREEKEY1", is_premium: false, created_at: new Date(Date.now() - 48 * 3600e3).toISOString() },
+  "BASICPLUS01": { key_value: "BASICPLUS01", is_premium: false, provider_name: "ECC00 Basic+", discord_id: "99", created_at: new Date().toISOString() },
 };
 jnkie.keyByValue = async (v) => KEYS[v] || null;
 const client = { users: { fetch: async (id) => ({ username: "owner" + id, displayAvatarURL: () => "pfp" }) }, channels: { cache: new Map() } };
@@ -52,6 +53,11 @@ const ask = (o) => gate.session(client, { robloxId: "1", hwid: "pc-a", placeId: 
   r = await ask({ key: "PREMIUMKEY1" });
   assert.ok(r.ok && r.premium && r.profile.username === "owner42");
   assert.match((await ask({ key: "PREMIUMKEY1", hwid: "pc-b" })).reason, /another device/, "key is locked to one device");
+  // Basic+ on FTF: unlocks Auto Farm (ticket b flag) but NOT full premium (p flag) — regression guard
+  r = await ask({ key: "BASICPLUS01" });
+  const tbody = JSON.parse(Buffer.from(r.ticket.split(".")[0], "base64url").toString());
+  assert.ok(r.ok && !r.premium && r.plan === "Basic+", "Basic+ key is not full premium on FTF");
+  assert.ok(tbody.b === 1 && tbody.p === 0, "Basic+ ticket gives farm (b) but not premium (p)");
 
   assert.equal((await ask({ placeId: "2788229376", key: "FREEKEY0001", hwid: "pc-a" })).need, "key", "paid game refuses free keys");
   assert.ok((await ask({ placeId: "2788229376", key: "PREMIUMKEY1" })).ok, "paid game takes premium");

@@ -117,21 +117,23 @@ app.post("/api/exec", express.json({ limit: "2kb" }), async (req, res) => {
   const seen = gate.lastSeen.get(String(userId));
   const link = gate.links.get(String(userId)) || (seen?.discordId ? seen : null);
   const job = /^[\w-]{8,64}$/.test(String(b.jobId || "")) ? b.jobId : null;
-  // How they actually got in this launch, not the game's configured mode: a key beats a
-  // Discord link (both can be present), and a genuine device-bound link means Discord verify.
-  const verified = gate.links.get(String(userId));
+  // Plan/Method come from the gate's own record of this launch (gate.lastSeen), never from what the loader
+  // claims in the POST — so a spoofed /api/exec can't make the log say "ECC00 Private" it didn't earn.
+  const plan = seen?.tester ? "Tester" : seen?.plan || (b.mode === "keyless" ? "Keyless" : "Free");
   const method = seen?.tester ? "Tester code"
-    : b.keyed ? (b.premium ? "Premium key" : "Free key")
-    : verified ? "Discord verify"
+    : seen?.premium ? "Premium key"
+    : seen?.plan === "Basic+" ? "Basic+ key"
+    : seen?.keyed ? "Basic key"
+    : seen ? "Discord verify"
     : b.mode === "keyless" ? "Keyless"
     : s(b.mode, 20);
   ch.send({ content: store.data.logPing || undefined, allowedMentions: { parse: ["users", "roles"] }, embeds: [brand(new EmbedBuilder()).setTitle("Script Executed").setTimestamp().addFields(
     { name: "Script", value: s(b.script), inline: true },
-    { name: "Plan", value: seen?.tester ? "Tester" : b.premium ? "ECC00 Private" : "Free", inline: true },
+    { name: "Plan", value: plan, inline: true },
     { name: "Method", value: method, inline: true },
     { name: "Executor", value: s(b.executor), inline: true },
     { name: "Platform", value: s(b.platform, 20), inline: true },
-    { name: "Key used", value: b.keyed ? "Yes" : "No", inline: true },
+    { name: "Key used", value: seen?.keyed ? "Yes" : "No", inline: true },
     { name: "Roblox", value: `[${s(b.displayName, 40)} (@${s(b.user, 40)})](https://www.roblox.com/users/${userId}/profile)\nAccount age: ${Number(b.accountAge) || 0} days`, inline: true },
     { name: "Discord", value: link ? `<@${link.discordId}>` : "Not linked", inline: true },
     { name: "Game", value: (place ? `[${s(b.game, 80)}](https://www.roblox.com/games/${place})` : s(b.game, 80)) + (job ? `\nServer: \`${job}\`` : "") },
