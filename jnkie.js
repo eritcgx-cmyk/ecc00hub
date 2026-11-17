@@ -65,6 +65,20 @@ async function whitelist(discordId, tier, minutes) {
   return key;
 }
 
+// Mint a test Basic+ key (non-premium, from the "ECC00 Basic+" provider so planOf sees it as basic+).
+// For testing the Basic+ tier; it unlocks Auto Farm only, never full premium.
+const BASIC_PLUS_PROVIDER = Number(process.env.JNKIE_BASICPLUS_PROVIDER_ID || 32149);
+async function basicPlusKey(minutes) {
+  const { key } = await api("POST", "/keys", {
+    provider_id: BASIC_PLUS_PROVIDER,
+    key_name: "ECC00 Basic+",
+    is_premium: false,
+    validity_minutes: minutes || 1440,
+    hwid_limit: 1,
+  });
+  return key.key_value;
+}
+
 const unwhitelist = (key) => api("PUT", `/keys/${key.id}`, { is_invalidated: true });
 const resetHwid = (key) => api("POST", `/keys/${key.id}/reset-hwid`);
 const hwidsOf = (key) => key.keys_hwid || key.hwids || [];
@@ -87,4 +101,4 @@ async function unblacklist(key) {
 // Cheap authenticated call, so a bad key shows up as an error instead of "configured".
 const ping = () => api("GET", "/services").then((d) => (d.services || d).length);
 
-module.exports = { planOf, ready, ping, keyFor, keyByValue, whitelist, unwhitelist, resetHwid, blacklist, unblacklist, tierOf, active, expired, hwidsOf };
+module.exports = { planOf, ready, ping, keyFor, keyByValue, whitelist, basicPlusKey, unwhitelist, resetHwid, blacklist, unblacklist, tierOf, active, expired, hwidsOf };

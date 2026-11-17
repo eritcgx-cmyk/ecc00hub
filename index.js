@@ -185,6 +185,9 @@ app.post("/api/admin", express.json({ limit: "4kb" }), async (req, res) => {
   } else if (action === "pluskey") { // the Basic+ JNKIE get-key link (2 checkpoints)
     if (value && !/^https:\/\/\S+$/.test(value)) return res.status(400).json({ error: "link must start with https://" });
     g.plusKeyUrl = value || null;
+  } else if (action === "testbasicplus") { // mint a Basic+ test key (unlocks Auto Farm only)
+    try { return res.json({ ok: true, key: await jnkie.basicPlusKey(Number(value) || 1440) }); }
+    catch (e) { return res.status(400).json({ error: e.message }); }
   } else if (action === "restore") { // value: { build: {game: url}, verifyChannel, versions: {game: v} } — refill lost settings
     const v = value || {};
     for (const [k, u] of Object.entries(v.build || {})) {
