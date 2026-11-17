@@ -5,6 +5,7 @@ const { AttachmentBuilder } = require("discord.js");
 const MARK = "ECC00 changelog storage (don't delete)";
 const KEEP = 30; // changelog entries per game
 const NOTICES = "__notices"; // reserved key: cloud notifications, newest first
+const FAQ = "__faq"; // reserved key: FAQ entries [{ id, q, a, threadId }]
 let msg = null;
 let logs = {}; // update key (ftf, mm2, sols...) -> [{ v, type, date, added, improved, fixed, removed }], newest first
 
@@ -35,7 +36,24 @@ async function notify(text, game) {
   return n;
 }
 
-const get = (game) => (game === NOTICES ? [] : logs[game] || []);
+const get = (game) => (game === NOTICES || game === FAQ ? [] : logs[game] || []);
 const notices = (game) => (logs[NOTICES] || []).filter((n) => !n.game || n.game === game).slice(0, 10);
 
-module.exports = { load, add, get, notify, notices };
+// FAQ: a flat list the bot posts to a forum (one thread each) or a channel (one embed).
+const faqList = () => logs[FAQ] || [];
+async function faqAdd(q, a) {
+  const e = { id: Date.now(), q: String(q).slice(0, 100), a: String(a).slice(0, 1500) };
+  logs[FAQ] = [...faqList(), e];
+  await save();
+  return e;
+}
+async function faqRemove(id) {
+  logs[FAQ] = faqList().filter((e) => e.id !== id);
+  await save();
+}
+async function faqSetThread(id, threadId) {
+  const e = faqList().find((x) => x.id === id);
+  if (e) { e.threadId = threadId; await save(); }
+}
+
+module.exports = { load, add, get, notify, notices, faqList, faqAdd, faqRemove, faqSetThread };

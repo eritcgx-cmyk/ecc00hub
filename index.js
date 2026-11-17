@@ -10,6 +10,17 @@ const {
 } = require("discord.js");
 const BASE_GAMES = require("./games");
 const GAME_FEATURES = require("./features.json"); // rebuilt from the script sources (scratch features.mjs)
+// Starter FAQ entries (/faq seed). Short Q + A about the key system and common issues.
+const FAQ_SEED = [
+  ["My key is invalid or expired", "Keys last 24 hours and lock to one device. Grab a fresh one with the Get Key button in the key channel (or eccohub.xyz/key), then paste it into the loader."],
+  ["How do I get a key?", "Verify once by typing the phrase the loader shows you in the verify channel. Then press Get Key, finish the checkpoints, copy your key and paste it into the ECC00 loader."],
+  ["Basic vs Basic+ vs ECC00 Private", "Basic (1 checkpoint): every free feature. Basic+ (2 checkpoints): Basic plus FTF Auto Farm. ECC00 Private (paid): everything, premium features included. See /features for any game."],
+  ["This key is locked to another device", "Each key binds to the first device that runs it. Use Reset HWID in the key panel, then the same key works on your new device."],
+  ["The script won't load / the loader does nothing", "Paste the whole loadstring and finish verify first. Sealed games load through our site, so give it a few seconds. Still stuck? Open a ticket."],
+  ["Premium features are greyed out", "Those need an ECC00 Private key; a free or Basic+ key shows them locked. FTF Auto Farm needs Basic+."],
+  ["Do I have to verify every time?", "No. Your device stays linked after the first verify. You only paste a new key when the old one expires (24h)."],
+  ["Is it safe? Will I get banned?", "Use any executor script at your own risk. We never ask for your password and never store it. Don't share your key with anyone."],
+];
 const store = require("./store");
 const isUi = (g) => /^(ecc00\s*)?ui$/i.test(g.name.trim()); // the UI gets /update posts but isn't a game
 const allGames = () => [...BASE_GAMES.filter((g) => !store.data.removed.includes(g.key)), ...store.data.games].filter((g) => !isUi(g));
@@ -439,6 +450,16 @@ const buildCmds = () => [
     .addChannelOption(chanOpt).addStringOption(pingOpt),
   new SlashCommandBuilder().setName("ticket").setDescription("Post the support ticket panel").setDefaultMemberPermissions(staff)
     .addChannelOption(chanOpt),
+  new SlashCommandBuilder().setName("faq").setDescription("Script & key-system FAQ").setDefaultMemberPermissions(staff)
+    .addSubcommand((s) => s.setName("post").setDescription("Post the FAQ (one forum thread each, or one embed in a text channel)")
+      .addChannelOption((o) => o.setName("channel").setDescription("Forum or text channel").setRequired(true).addChannelTypes(ChannelType.GuildForum, ChannelType.GuildText)))
+    .addSubcommand((s) => s.setName("add").setDescription("Add a FAQ entry")
+      .addStringOption((o) => o.setName("question").setDescription("Question").setRequired(true))
+      .addStringOption((o) => o.setName("answer").setDescription("Answer").setRequired(true)))
+    .addSubcommand((s) => s.setName("remove").setDescription("Remove a FAQ entry")
+      .addStringOption((o) => o.setName("id").setDescription("Entry id (from /faq list)").setRequired(true)))
+    .addSubcommand((s) => s.setName("list").setDescription("List FAQ entries and their ids"))
+    .addSubcommand((s) => s.setName("seed").setDescription("Add the starter FAQ entries (key system + common issues)")),
   new SlashCommandBuilder().setName("gate").setDefaultMemberPermissions(staff).setDescription("Loader key system")
     .addSubcommand((s) => s.setName("mode").setDescription("Key mode for a game, or the loader default")
       .addStringOption((o) => o.setName("target").setDescription("Game, or Loader (default for every game)").setRequired(true).addChoices(...gateChoices()))
@@ -668,6 +689,43 @@ async function onCommand(i) {
           new ButtonBuilder().setCustomId("ticket:open").setLabel("Open Ticket").setStyle(ButtonStyle.Primary))],
       });
       return reply(i, { content: `Ticket panel posted in ${ch}.` });
+    }
+
+    case "faq": {
+      const sub = o.getSubcommand();
+      if (sub === "add") { const e = await changelog.faqAdd(o.getString("question"), o.getString("answer")); return reply(i, { content: `Added FAQ \`${e.id}\`. Run /faq post to publish.` }); }
+      if (sub === "remove") { await changelog.faqRemove(Number(o.getString("id"))); return reply(i, { content: "Removed. Run /faq post to update (its forum thread, if any, stays — delete it by hand)." }); }
+      if (sub === "list") {
+        const list = changelog.faqList();
+        return reply(i, { content: list.length ? list.map((e) => `\`${e.id}\` — ${e.q}`).join("\n").slice(0, 1900) : "No FAQ entries yet. Run /faq seed for the starters." });
+      }
+      if (sub === "seed") {
+        const have = new Set(changelog.faqList().map((e) => e.q));
+        let n = 0;
+        for (const [q, a] of FAQ_SEED) if (!have.has(q)) { await changelog.faqAdd(q, a); n++; }
+        return reply(i, { content: `Added ${n} starter FAQ ${n === 1 ? "entry" : "entries"}. Run /faq post to publish.` });
+      }
+      // post
+      await i.deferReply({ ephemeral: true });
+      const ch = o.getChannel("channel");
+      const list = changelog.faqList();
+      if (!list.length) return reply(i, { content: "No FAQ entries. Run /faq seed first." });
+      if (ch.type === ChannelType.GuildForum) {
+        let made = 0, edited = 0;
+        for (const e of list) {
+          const body = { embeds: [brand(new EmbedBuilder()).setTitle(e.q).setDescription(e.a)] };
+          const existing = e.threadId && await ch.threads.fetch(e.threadId).catch(() => null);
+          if (existing) { const starter = await existing.fetchStarterMessage().catch(() => null); if (starter) { await starter.edit(body); edited++; } }
+          else { const th = await ch.threads.create({ name: e.q, message: body }); await changelog.faqSetThread(e.id, th.id); made++; }
+        }
+        return reply(i, { content: `FAQ posted to ${ch}: ${made} new thread(s), ${edited} updated.` });
+      }
+      // text channel: one self-updating embed
+      const e = brand(new EmbedBuilder()).setTitle("ECC00 FAQ").setThumbnail(LOGO);
+      for (const f of list.slice(0, 25)) e.addFields({ name: f.q, value: f.a.slice(0, 1024) });
+      const prev = store.data.faqMsg && await ch.messages.fetch(store.data.faqMsg).catch(() => null);
+      if (prev) await prev.edit({ embeds: [e] }); else { const m = await ch.send({ embeds: [e] }); store.data.faqMsg = m.id; await store.save(); }
+      return reply(i, { content: `FAQ posted in ${ch}.` });
     }
 
     case "gate": {
