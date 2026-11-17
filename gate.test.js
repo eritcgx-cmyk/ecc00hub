@@ -101,3 +101,14 @@ const ask = (o) => gate.session(client, { robloxId: "1", hwid: "pc-a", placeId: 
   a.strictEqual(buildFor(s, "da_hood", true), null, "testers skip JNKIE");
   console.log("seal ok");
 }
+
+// Basic+ = a free key from the "ECC00 Basic+" JNKIE provider; premium keys keep their own tier
+{
+  const { planOf } = require("./jnkie");
+  const a = require("assert");
+  a.strictEqual(planOf({ is_premium: false, provider_name: "ECC00 Basic+" }), "basic+");
+  a.strictEqual(planOf({ is_premium: false, provider_name: "ECC00 Free Key" }), "free");
+  a.strictEqual(planOf({ is_premium: false }), "free");
+  a.strictEqual(planOf({ is_premium: true, key_name: "ECC00 premium", provider_name: "ECC00 Premium" }), "premium");
+  console.log("plans ok");
+}

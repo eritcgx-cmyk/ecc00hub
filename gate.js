@@ -20,6 +20,8 @@ const jnkie = require("./jnkie");
 const SECRET = process.env.GATE_SECRET || "";
 const TICKET_SECONDS = 120;
 const PHRASE_MINUTES = 15;
+// the loader's Get Key button: eccohub.xyz/key explains Basic vs Basic+ and links both JNKIE flows
+const KEY_PAGE = "https://eccohub.xyz/key";
 const MODES = ["keyless", "discord", "keyed", "discordkey"]; // discordkey = Discord verify AND a key
 
 const links = new Map(); // robloxId -> { discordId, hwid, msg }
@@ -179,14 +181,15 @@ async function session(client, b) {
   if (tester) keyed = true;
   else if (isStr(b.key, 128) && /^[\w-]{8,128}$/.test(b.key)) {
     const k = await jnkie.keyByValue(b.key).catch(() => null);
-    if (!jnkie.active(k)) return { ok: false, need: "key", getKey: s.getKeyUrl || null, reason: "That key is invalid or expired.", ...about };
-    if (!(await bindKey(b.key, hwid))) return { ok: false, need: "key", getKey: s.getKeyUrl || null, reason: "This key is locked to another device. Reset HWID in the Discord panel.", ...about };
+    if (!jnkie.active(k)) return { ok: false, need: "key", getKey: KEY_PAGE, reason: "That key is invalid or expired.", ...about };
+    if (!(await bindKey(b.key, hwid))) return { ok: false, need: "key", getKey: KEY_PAGE, reason: "This key is locked to another device. Reset HWID in the Discord panel.", ...about };
     // free checkpoint keys aren't premium and only last s.freeKeyHours (set from the PC terminal)
     if (!k.is_premium && Date.parse(k.created_at) + (s.freeKeyHours || 24) * 3600_000 < Date.now()) {
-      return { ok: false, need: "key", getKey: s.getKeyUrl || null, reason: "Your free key ran out. Get a new one.", ...about };
+      return { ok: false, need: "key", getKey: KEY_PAGE, reason: "Your free key ran out. Get a new one.", ...about };
     }
     keyed = true;
-    tier = k.is_premium ? jnkie.tierOf(k) : "free";
+    // Basic+ keys come from their own JNKIE provider (2 Lootlabs checkpoints): it unlocks Auto Farm
+    tier = jnkie.planOf(k);
     profile = await profileOf(client, k.discord_id);
   }
 
@@ -198,25 +201,26 @@ async function session(client, b) {
       if (pending.size > 5000) for (const [k, v] of pending) if (v.exp < Date.now()) pending.delete(k); // spam can't grow it forever
       pending.set(phrase, { robloxId, hwid, exp: Date.now() + PHRASE_MINUTES * 60_000 });
       const ch = s.verifyChannel && client.channels.cache.get(s.verifyChannel);
-      return { ok: false, need: "discord", phrase, channel: "#" + ((ch && ch.name.normalize("NFKC").replace(/[^ -~]/g, "")) || "verify"), getKey: s.getKeyUrl || null, ...about };
+      return { ok: false, need: "discord", phrase, channel: "#" + ((ch && ch.name.normalize("NFKC").replace(/[^ -~]/g, "")) || "verify"), getKey: KEY_PAGE, ...about };
     }
     profile = await profileOf(client, link.discordId);
   }
-  if ((mode === "keyed" || mode === "discordkey") && !keyed) return { ok: false, need: "key", getKey: s.getKeyUrl || null, reason: "This game needs a key.", ...about };
+  if ((mode === "keyed" || mode === "discordkey") && !keyed) return { ok: false, need: "key", getKey: KEY_PAGE, reason: "This game needs a key.", ...about };
   // discordkey: every key holder (free keys too) gets every feature, except FTF: its premium needs a premium key
   const premium = tier !== "free" || Boolean(store.data.freePremium[game.key]) || (mode === "discordkey" && keyed && game.key !== "ftf");
-  if (game.paid && !premium) return { ok: false, need: "key", getKey: s.getKeyUrl || null, reason: `${game.name} needs a premium key.`, ...about };
+  if (game.paid && !premium) return { ok: false, need: "key", getKey: KEY_PAGE, reason: `${game.name} needs a premium key.`, ...about };
 
   if (profile) lastSeen.set(robloxId, { discordId: profile.id, tier });
   else if (tester) lastSeen.set(robloxId, { tester: true, tier });
+  const plan = premium ? "ECC00 Private" : tier === "basic+" ? "Basic+" : keyed ? "Basic" : "Keyless";
   return {
-    ok: true, mode, tier, premium, profile, game: game.key, name: game.name,
+    ok: true, mode, tier, plan, premium, profile, game: game.key, name: game.name,
     // Luraph-protected build (Panda Vault or JNKIE), handed over only once the gate has passed
     // ...except JNKIE builds for testers: JNKIE only takes real JNKIE keys, so testers get the sealed Blob copy
     // ...and sealed Panda games never get their link at all: eccohub.xyz/api/load serves its private copy for the ticket
     build: buildFor(s, game.key, tester),
     // ff: premium features staff made free (/freefeature); /api/load serves those modules to this ticket too
-    ticket: ticket({ g: game.key, f: game.file, p: premium ? 1 : 0, r: robloxId, ff: (store.data.freeFeatures || {})[game.key] || [] }),
+    ticket: ticket({ g: game.key, f: game.file, p: premium ? 1 : 0, b: premium || tier === "basic+" ? 1 : 0, r: robloxId, ff: (store.data.freeFeatures || {})[game.key] || [] }),
   };
 }
 

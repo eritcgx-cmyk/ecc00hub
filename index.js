@@ -5,10 +5,11 @@ const express = require("express");
 const path = require("path");
 const {
   Client, GatewayIntentBits, Events, EmbedBuilder, ActivityType, ChannelType,
-  ActionRowBuilder, ButtonBuilder, ButtonStyle,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder,
   REST, Routes, SlashCommandBuilder, PermissionFlagsBits,
 } = require("discord.js");
 const BASE_GAMES = require("./games");
+const GAME_FEATURES = require("./features.json"); // rebuilt from the script sources (scratch features.mjs)
 const store = require("./store");
 const isUi = (g) => /^(ecc00\s*)?ui$/i.test(g.name.trim()); // the UI gets /update posts but isn't a game
 const allGames = () => [...BASE_GAMES.filter((g) => !store.data.removed.includes(g.key)), ...store.data.games].filter((g) => !isUi(g));
@@ -168,6 +169,9 @@ app.post("/api/admin", express.json({ limit: "4kb" }), async (req, res) => {
   } else if (action === "getkey") {
     if (value && !/^https:\/\/\S+$/.test(value)) return res.status(400).json({ error: "link must start with https://" });
     g.getKeyUrl = value || null;
+  } else if (action === "pluskey") { // the Basic+ JNKIE get-key link (2 checkpoints)
+    if (value && !/^https:\/\/\S+$/.test(value)) return res.status(400).json({ error: "link must start with https://" });
+    g.plusKeyUrl = value || null;
   } else if (action === "restore") { // value: { build: {game: url}, verifyChannel, versions: {game: v} } — refill lost settings
     const v = value || {};
     for (const [k, u] of Object.entries(v.build || {})) {
@@ -245,16 +249,37 @@ function parseDuration(s) {
 function gamesEmbed() {
   const paid = paidGames(), mid = freemiumGames(), free = freeGames();
   return brand(new EmbedBuilder()).setTitle("Supported Games").setThumbnail(LOGO).addFields(
-    { name: `Premium (${paid.length})`, value: column(paid), inline: true },
-    { name: `Freemium (${mid.length})`, value: column(mid), inline: true },
-    { name: `Free (${free.length})`, value: column(free), inline: true });
+    { name: `ECC00 Private (${paid.length})`, value: column(paid), inline: true },
+    { name: `Basic + Private (${mid.length})`, value: column(mid), inline: true },
+    { name: `Basic (${free.length})`, value: column(free), inline: true })
+    .setDescription("Plans: **Keyless**, **Basic** (1 checkpoint), **Basic+** (2 checkpoints, FTF Auto Farm), **ECC00 Private** (paid). `/features` lists every game's features by plan.");
+}
+
+// /features: pick a game, see what each plan gets
+const PLAN_NOTE = { "Basic": "1 checkpoint key", "Basic+": "2 checkpoint key", "ECC00 Private": "paid" };
+const featuresMenu = () => new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId("features")
+  .setPlaceholder("Pick a game").addOptions(Object.entries(GAME_FEATURES).slice(0, 25).map(([k, g]) => ({ label: g.name, value: k }))));
+function featuresEmbed(key) {
+  const g = GAME_FEATURES[key];
+  const e = brand(new EmbedBuilder()).setTitle(g ? `${g.name} features` : "Features by plan");
+  if (!g) return e.setDescription("Plans: **Keyless**, **Basic** (1 checkpoint), **Basic+** (2 checkpoints, adds FTF Auto Farm), **ECC00 Private** (paid).\nPick a game below.");
+  e.setDescription("Each plan also gets everything in the plans above it.");
+  for (const [plan, list] of Object.entries(g.plans)) {
+    let chunk = "", n = 0; // embed fields cap at 1024 chars
+    for (const f of list) {
+      if (chunk.length + f.length + 3 > 1000) { e.addFields({ name: n++ ? `${plan} (cont.)` : `${plan} (${PLAN_NOTE[plan]})`, value: chunk }); chunk = ""; }
+      chunk += (chunk ? ", " : "") + f;
+    }
+    if (chunk) e.addFields({ name: n ? `${plan} (cont.)` : `${plan} (${PLAN_NOTE[plan]})`, value: chunk });
+  }
+  return e;
 }
 
 // The board deletes itself and reposts only when the list really changed, so restarts don't bump the channel.
 async function refreshBoard() {
   const b = store.data.gamesBoard;
   if (!b?.channel) return;
-  const sig = JSON.stringify([paidGames(), freemiumGames(), freeGames()].map((l) => l.map((g) => g.name)));
+  const sig = "tiers2" + JSON.stringify([paidGames(), freemiumGames(), freeGames()].map((l) => l.map((g) => g.name))); // bump the prefix when the layout changes
   if (b.sig === sig) return;
   const ch = await client.channels.fetch(b.channel).catch(() => null);
   if (!ch) return console.error("games board: channel is gone");
@@ -364,6 +389,7 @@ const buildCmds = () => [
     .addStringOption((o) => o.setName("type").setDescription("Which panel").setRequired(true)
       .addChoices({ name: "Free", value: "free" }, { name: "Paid", value: "paid" })),
   new SlashCommandBuilder().setName("games").setDescription("Show every supported game"),
+  new SlashCommandBuilder().setName("features").setDescription("Every game's features, by plan (Basic, Basic+, ECC00 Private)"),
   new SlashCommandBuilder().setName("gamesboard").setDescription("Post a games list that keeps itself up to date").setDefaultMemberPermissions(staff)
     .addChannelOption(chanOpt),
   new SlashCommandBuilder().setName("whitelist").setDescription("Manage premium access (JNKIE)").setDefaultMemberPermissions(staff)
@@ -555,6 +581,9 @@ async function onCommand(i) {
 
     case "games":
       return i.reply({ embeds: [gamesEmbed()] });
+
+    case "features":
+      return i.reply({ ephemeral: true, embeds: [featuresEmbed()], components: [featuresMenu()] });
 
     case "gamesboard": {
       await i.deferReply({ ephemeral: true });
@@ -776,6 +805,7 @@ client.on(Events.GuildMemberRemove, gate.onLeave);
 client.on(Events.InteractionCreate, async (i) => {
   try {
     if (i.isChatInputCommand()) return await onCommand(i);
+    if (i.isStringSelectMenu() && i.customId === "features") return await i.update({ embeds: [featuresEmbed(i.values[0])], components: [featuresMenu()] });
     if (i.isButton() && i.customId.startsWith("paid:")) return await paidButton(i, i.customId.slice(5));
     if (i.isButton() && i.customId.startsWith("ticket:")) return await ticketButton(i, i.customId.slice(7));
   } catch (e) {
@@ -798,10 +828,17 @@ async function verifySticky() {
       .setDescription([
         "Some games need a key as well as this verify step.",
         "1. Type the phrase the loader shows you here.",
-        "2. Press **Get Key**, finish the steps, copy your key.",
+        "2. Pick a key, finish the steps, copy your key.",
         "3. Paste it into the ECC00 loader.",
+        "",
+        "**Basic**: 1 checkpoint, every free feature.",
+        "**Basic+**: 2 checkpoints, Basic plus FTF Auto Farm.",
+        "Both last 24 hours. Compare: https://eccohub.xyz/key",
       ].join("\n"))],
-    components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setLabel("Get Key").setStyle(ButtonStyle.Link).setURL(g.getKeyUrl))],
+    components: [new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setLabel("Basic key").setStyle(ButtonStyle.Link).setURL(g.getKeyUrl),
+      ...(g.plusKeyUrl ? [new ButtonBuilder().setLabel("Basic+ key").setStyle(ButtonStyle.Link).setURL(g.plusKeyUrl)] : []),
+    )],
   });
   store.data.verifySticky = msg.id;
   await store.save();

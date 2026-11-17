@@ -22,6 +22,10 @@ async function api(method, path, body) {
 const TIER_PREFIX = "ECC00 ";
 const tierOf = (key) => (key.key_name || "").startsWith(TIER_PREFIX) ? key.key_name.slice(TIER_PREFIX.length) : "premium";
 
+// Plan of a key: premium keys carry their tier in the name; free keys are Basic, unless they came from the
+// "ECC00 Basic+" provider (2 Lootlabs checkpoints), which unlocks Auto Farm.
+const planOf = (key) => key.is_premium ? tierOf(key) : /basic\s*\+|plus/i.test(key.provider_name || "") ? "basic+" : "free";
+
 const expired = (key) => key.expires_at && new Date(key.expires_at) <= new Date();
 const active = (key) => Boolean(key && !key.is_invalidated && !expired(key));
 
@@ -83,4 +87,4 @@ async function unblacklist(key) {
 // Cheap authenticated call, so a bad key shows up as an error instead of "configured".
 const ping = () => api("GET", "/services").then((d) => (d.services || d).length);
 
-module.exports = { ready, ping, keyFor, keyByValue, whitelist, unwhitelist, resetHwid, blacklist, unblacklist, tierOf, active, expired, hwidsOf };
+module.exports = { planOf, ready, ping, keyFor, keyByValue, whitelist, unwhitelist, resetHwid, blacklist, unblacklist, tierOf, active, expired, hwidsOf };
