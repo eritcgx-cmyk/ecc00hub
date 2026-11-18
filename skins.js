@@ -8,7 +8,8 @@ const { AttachmentBuilder, ChannelType, Events } = require("discord.js");
 
 const FILE = "mm2_skins.json";
 const MAX_IDS = 4000;
-const ASSET = /^(rbxassetid:\/\/\d{1,20}|https?:\/\/www\.roblox\.com\/asset\/\?id=\d{1,20})$/;
+// MM2 writes both "asset/?id=" and "asset?id=" (e.g. Laser); rejecting the second dropped half the library
+const ASSET = /^(rbxassetid:\/\/\d{1,20}|https?:\/\/www\.roblox\.com\/asset\/?\?id=\d{1,20})$/;
 
 // one reported skin -> a clean entry, or null if anything is off
 function clean(e) {
