@@ -212,14 +212,26 @@ app.post("/api/admin", express.json({ limit: "4kb" }), async (req, res) => {
   } else if (action === "notify") { // value: { text, game }
     const n = await changelog.notify((value || {}).text, (value || {}).game);
     return res.json({ ok: true, notice: n });
-  } else if (action === "update") { // value: { game, version, type, added, improved, fixed, removed, private, channel, ping }
+  } else if (action === "update" || action === "retract") {
+    // update: { game, version, type, added, improved, fixed, removed, private, channel, ping }
+    // retract: { game, channel, title, notice, minutes } - deletes the bot's posts titled `title` from the last
+    // `minutes` and the in-game changelog/notices for `game` that start with `notice` (undo a wrong /update)
     const u = value || {};
+    if (action === "update" && !u.game) return res.status(400).json({ error: "game is required" }); // no game = a 'Loader' post + a notice shown in every game
     const guild = store.home(client);
     const plain = (n) => String(n || "").normalize("NFKC").toLowerCase().replace(/[^a-z0-9]/g, ""); // "📢・updates" matches "updates"
     const want = plain(u.channel);
     const text = guild ? [...guild.channels.cache.values()].filter((c) => c.isTextBased() && !c.isThread?.()) : [];
     const ch = want && (text.find((c) => plain(c.name) === want) || text.find((c) => plain(c.name).includes(want)));
     if (!ch) return res.status(400).json({ error: "channel not found", channels: text.map((c) => c.name) });
+    if (action === "retract") {
+      const since = Date.now() - (Number(u.minutes) || 60) * 60000;
+      const msgs = await ch.messages.fetch({ limit: 50 });
+      const bad = msgs.filter((m) => m.author.id === client.user.id && m.createdTimestamp > since && m.embeds[0]?.title === u.title);
+      for (const m of bad.values()) await m.delete();
+      const dropped = await changelog.retract(String(u.game ?? ""), String(u.notice || ""));
+      return res.json({ ok: true, deleted: bad.size, ...dropped });
+    }
     const e = updateEmbed(String(u.game || ""), String(u.version || ""), u.type, (k) => u[k]);
     if (!e) return res.status(400).json({ error: "no changes" });
     const ping = PINGS[u.ping];

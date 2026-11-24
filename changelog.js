@@ -36,6 +36,18 @@ async function notify(text, game) {
   return n;
 }
 
+// undo a wrong /update: drop the orphan changelog an update with no game made ("" key only, never a real game's
+// history) and the notices that start with `notice`
+async function retract(game, notice) {
+  const entries = game === "" && logs[game] ? logs[game].length : 0;
+  if (entries) delete logs[game];
+  const before = (logs[NOTICES] || []).length;
+  if (notice) logs[NOTICES] = (logs[NOTICES] || []).filter((n) => !n.text.startsWith(notice));
+  const notices = before - (logs[NOTICES] || []).length;
+  if (entries || notices) await save();
+  return { entries, notices };
+}
+
 const get = (game) => (game === NOTICES || game === FAQ ? [] : logs[game] || []);
 const notices = (game) => (logs[NOTICES] || []).filter((n) => !n.game || n.game === game).slice(0, 10);
 
@@ -56,4 +68,4 @@ async function faqSetThread(id, threadId) {
   if (e) { e.threadId = threadId; await save(); }
 }
 
-module.exports = { load, add, get, notify, notices, faqList, faqAdd, faqRemove, faqSetThread };
+module.exports = { load, add, get, notify, retract, notices, faqList, faqAdd, faqRemove, faqSetThread };
