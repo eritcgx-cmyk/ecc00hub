@@ -104,10 +104,12 @@ async function bindKey(key, hwid) {
   const h = crypto.createHash("sha256").update(key).digest("hex");
   const b = binds.get(h);
   if (b) return b.hwid === hwid;
-  const msg = await dbChannel.send(`bind ${h} ${hwid}`);
-  binds.set(h, { hwid, msg });
+  const rec = { hwid, msg: null };
+  binds.set(h, rec); // claimed before the await, so two devices at once can't both get in
+  try { rec.msg = await dbChannel.send(`bind ${h} ${hwid}`); } catch (e) { binds.delete(h); throw e; }
   return true;
 }
+const isBound = (key) => binds.has(crypto.createHash("sha256").update(key).digest("hex"));
 function resetBind(key) {
   const h = crypto.createHash("sha256").update(key).digest("hex");
   binds.get(h)?.msg?.delete().catch(() => {});
@@ -175,21 +177,25 @@ async function session(client, b) {
   const about = { mode, game: game.key, name: game.name }; // every answer says which game, so the loader can show it
 
   // a key always counts, in any mode: it's how premium unlocks
-  let tier = "free", profile = null, keyed = false;
+  let tier = "free", profile = null, keyed = false, ends = null;
   // ScriptBlox testers: one shared code that passes on any account or device, as a free user only
   const tester = isTester(b.key, s.testerCode);
   if (tester) keyed = true;
   else if (isStr(b.key, 128) && /^[\w-]{8,128}$/.test(b.key)) {
-    const k = await jnkie.keyByValue(b.key).catch(() => null);
+    let k;
+    try { k = await jnkie.keyByValue(b.key); }
+    catch { return { ok: false, need: "retry", reason: "Can't check keys right now. Try again in a minute.", ...about }; } // outage isn't a bad key
+    if (jnkie.isPending(k)) return { ok: false, need: "key", getKey: KEY_PAGE, reason: "Redeem this key in the Discord panel first.", ...about };
     if (!jnkie.active(k)) return { ok: false, need: "key", getKey: KEY_PAGE, reason: "That key is invalid or expired.", ...about };
     if (!(await bindKey(b.key, hwid))) return { ok: false, need: "key", getKey: KEY_PAGE, reason: "This key is locked to another device. Reset HWID in the Discord panel.", ...about };
     // free checkpoint keys aren't premium and only last s.freeKeyHours (set from the PC terminal)
-    if (!k.is_premium && Date.parse(k.created_at) + (s.freeKeyHours || 24) * 3600_000 < Date.now()) {
+    if (!k.is_premium && !jnkie.staffKey(k) && Date.parse(k.created_at) + (s.freeKeyHours || 24) * 3600_000 < Date.now()) {
       return { ok: false, need: "key", getKey: KEY_PAGE, reason: "Your free key ran out. Get a new one.", ...about };
     }
     keyed = true;
     // Basic+ keys come from their own JNKIE provider (2 Lootlabs checkpoints): it unlocks Auto Farm
     tier = jnkie.planOf(k);
+    ends = k.expires_at ? Math.floor(Date.parse(k.expires_at) / 1000) : null;
     profile = await profileOf(client, k.discord_id);
   }
 
@@ -206,10 +212,9 @@ async function session(client, b) {
     profile = await profileOf(client, link.discordId);
   }
   if ((mode === "keyed" || mode === "discordkey") && !keyed) return { ok: false, need: "key", getKey: KEY_PAGE, reason: "This game needs a key.", ...about };
-  // discordkey: every key holder (free keys too) gets every feature, except FTF: its premium needs a premium key.
-  // Basic+ is NOT full premium — it only unlocks Auto Farm (the ticket's b flag), so it never sets `premium`.
-  const paidTier = tier !== "free" && tier !== "basic+";
-  const premium = paidTier || Boolean(store.data.freePremium[game.key]) || (mode === "discordkey" && keyed && game.key !== "ftf");
+  // Only a paid key is premium (or /freepremium for that game). Free and Basic+ keys never are; Basic+ just
+  // unlocks Auto Farm (the ticket's b flag).
+  const premium = jnkie.isPaid(tier) || Boolean(store.data.freePremium[game.key]);
   if (game.paid && !premium) return { ok: false, need: "key", getKey: KEY_PAGE, reason: `${game.name} needs a premium key.`, ...about };
 
   const plan = premium ? "ECC00 Private" : tier === "basic+" ? "Basic+" : keyed ? "Basic" : "Keyless";
@@ -218,6 +223,7 @@ async function session(client, b) {
   else if (tester) lastSeen.set(robloxId, { tester: true, tier, plan, keyed, premium });
   return {
     ok: true, mode, tier, plan, premium, profile, game: game.key, name: game.name,
+    left: ends ? Math.max(0, ends - Math.floor(Date.now() / 1000)) : null, // seconds until the key runs out: the loader stops then
     // Luraph-protected build (Panda Vault or JNKIE), handed over only once the gate has passed
     // ...except JNKIE builds for testers: JNKIE only takes real JNKIE keys, so testers get the sealed Blob copy
     // ...and sealed Panda games never get their link at all: eccohub.xyz/api/load serves its private copy for the ticket
@@ -259,4 +265,4 @@ const gameList = () => [...games.byKey.values()];
 // gate.test.js swaps in a fake db channel and game list
 const _setForTest = (db, list) => { dbChannel = db; games = { byPlace: new Map(list.flatMap((g) => g.places.map((p) => [String(p), g]))), byKey: new Map(list.map((g) => [g.key, g])) }; };
 
-module.exports = { buildFor, _setForTest, load, session, onMessage, onLeave, settings, resetBind, dropLinksOf, refreshGames, gameList, links, lastSeen, MODES };
+module.exports = { buildFor, _setForTest, load, session, onMessage, onLeave, settings, isBound, resetBind, dropLinksOf, refreshGames, gameList, links, lastSeen, MODES };

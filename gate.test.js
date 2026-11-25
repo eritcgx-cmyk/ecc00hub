@@ -10,6 +10,8 @@ const KEYS = {
   "FREEKEY0001": { key_value: "FREEKEY0001", is_premium: false, created_at: new Date().toISOString() },
   "FREEKEY0002": { key_value: "FREEKEY0002", is_premium: false, created_at: new Date().toISOString() },
   "OLDFREEKEY1": { key_value: "OLDFREEKEY1", is_premium: false, created_at: new Date(Date.now() - 48 * 3600e3).toISOString() },
+  "PENDINGKEY1": { key_value: "PENDINGKEY1", is_premium: false, is_invalidated: true, key_name: "ECC00 pending premium 10080", created_at: new Date().toISOString() },
+  "STAFFPLUS01": { key_value: "STAFFPLUS01", is_premium: false, key_name: "ECC00 staff basic+", created_at: new Date(Date.now() - 48 * 3600e3).toISOString(), expires_at: new Date(Date.now() + 1e7).toISOString() },
   "BASICPLUS01": { key_value: "BASICPLUS01", is_premium: false, provider_name: "ECC00 Basic+", discord_id: "99", created_at: new Date().toISOString() },
 };
 jnkie.keyByValue = async (v) => KEYS[v] || null;
@@ -89,7 +91,15 @@ const ask = (o) => gate.session(client, { robloxId: "1", hwid: "pc-a", placeId: 
   assert.ok(!r.premium && r.tier === "free", "FTF: a free key gets the regular script, not FTF premium");
   s.modes.mm2 = "discordkey";
   r = await ask({ robloxId: "50", hwid: "pc-k", key: "FREEKEY0002", placeId: "142823291" });
-  assert.ok(r.ok && r.premium && r.tier === "free", "MM2: a free key still unlocks every feature");
+  assert.ok(r.ok && !r.premium && r.plan === "Basic", "MM2: a free key is never premium");
+  s.modes.ftf = "keyed";
+  assert.match((await ask({ key: "PENDINGKEY1" })).reason, /Redeem this key/);
+  r = await ask({ key: "STAFFPLUS01" });
+  assert.ok(r.ok && r.plan === "Basic+" && r.left > 0, "a generated Basic+ key outlives freeKeyHours");
+  const real = jnkie.keyByValue;
+  jnkie.keyByValue = async () => { throw new Error("down"); };
+  assert.equal((await ask({ key: "PREMIUMKEY1" })).need, "retry", "a JNKIE outage isn't an invalid key");
+  jnkie.keyByValue = real;
   s.off.ftf = true;
   assert.match((await ask({ key: "PREMIUMKEY1" })).reason, /turned off/);
   console.log("gate ok");

@@ -6,7 +6,8 @@ const path = require("path");
 const {
   Client, GatewayIntentBits, Events, EmbedBuilder, ActivityType, ChannelType,
   ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder,
-  REST, Routes, SlashCommandBuilder, PermissionFlagsBits,
+  REST, Routes, SlashCommandBuilder, PermissionFlagsBits, MessageFlags,
+  ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, MediaGalleryBuilder, ModalBuilder, TextInputBuilder, TextInputStyle,
 } = require("discord.js");
 const BASE_GAMES = require("./games");
 const GAME_FEATURES = require("./features.json"); // rebuilt from the script sources (scratch features.mjs)
@@ -42,8 +43,9 @@ app.get("/health", (_req, res) => res.json({ ok: true, bot: client?.isReady?.() 
 // Per-IP attempt limiter: true once this IP has used `max` tries within `ms`.
 // ponytail: in-memory and cleared when it gets big; a restart resets it, fine for guess-limiting.
 const buckets = new Map();
+const ipOf = (req) => String(req.headers["cf-connecting-ip"] || req.headers["x-forwarded-for"] || req.ip).split(",")[0]; // Cloudflare sets the first one itself; x-forwarded-for can be faked
 function limited(req, name, max, ms) {
-  const ip = String(req.headers["x-forwarded-for"] || req.ip).split(",")[0];
+  const ip = ipOf(req);
   const k = name + ":" + ip, now = Date.now(), b = buckets.get(k);
   if (buckets.size > 50_000) buckets.clear();
   if (!b || now - b.start > ms) { buckets.set(k, { start: now, n: 1 }); return false; }
@@ -63,7 +65,7 @@ app.get("/api/tier/:discordId", async (req, res) => {
   if (hit && Date.now() - hit.at < 60_000) return res.json(hit.body);
   try {
     const key = await jnkie.keyFor(id);
-    const body = { active: jnkie.active(key), tier: key ? jnkie.tierOf(key) : null };
+    const body = { active: jnkie.active(key), tier: key ? (jnkie.isPaid(jnkie.planOf(key)) ? jnkie.planOf(key) : "user") : null };
     if (body.active) {
       const user = await client.users.fetch(id).catch(() => null);
       if (user) Object.assign(body, { username: user.globalName || user.username, avatar: avatar(user) });
@@ -142,9 +144,10 @@ app.post("/api/exec", express.json({ limit: "2kb" }), async (req, res) => {
 // The loader asks this on every launch: may this Roblox account + device run this game? (see gate.js)
 const lastSession = new Map();
 app.post("/api/session", express.json({ limit: "2kb" }), async (req, res) => {
-  const ip = String(req.headers["x-forwarded-for"] || req.ip).split(",")[0];
+  const ip = ipOf(req);
   // 10 asks per 10s per IP: a house or school shares one IP, and the loader polls while waiting for a phrase
   const now = Date.now();
+  if (lastSession.size > 50_000) lastSession.clear();
   const w = lastSession.get(ip);
   if (!w || now - w.start > 10_000) lastSession.set(ip, { start: now, n: 1 });
   else if (++w.n > 10) return res.status(429).json({ ok: false, reason: "Slow down." });
@@ -188,6 +191,8 @@ app.post("/api/admin", express.json({ limit: "4kb" }), async (req, res) => {
   } else if (action === "testbasicplus") { // mint a Basic+ test key (unlocks Auto Farm only)
     try { return res.json({ ok: true, key: await jnkie.basicPlusKey(Number(value) || 1440) }); }
     catch (e) { return res.status(400).json({ error: e.message }); }
+  } else if (action === "tempkeys") { // read-only: premium keys with a length; never returns key values
+    return res.json((await jnkie.tempKeys()).map((k) => ({ discordId: k.discord_id, plan: jnkie.planOf(k), created: k.created_at, ends: k.expires_at, minutes: k.validity_minutes, noEnd: k.noEnd })));
   } else if (action === "restore") { // value: { build: {game: url}, verifyChannel, versions: {game: v} } — refill lost settings
     const v = value || {};
     for (const [k, u] of Object.entries(v.build || {})) {
@@ -245,7 +250,7 @@ app.post("/api/admin", express.json({ limit: "4kb" }), async (req, res) => {
     saved: { games: store.data.games.map((x) => x.name), removed: store.data.removed, versions: store.data.versions,
       freePremium: Object.keys(store.data.freePremium), logChannel: Boolean(store.data.logChannel) } });
 });
-app.get("/health/jnkie", (_req, res) => jnkie.ping()
+app.get("/health/jnkie", (req, res) => limited(req, "jnkie", 5, 60_000) ? res.status(429).json({ ok: false }) : jnkie.ping()
   .then((services) => res.json({ ok: true, services }))
   .catch((e) => res.status(502).json({ ok: false, error: e.message })));
 
@@ -318,63 +323,133 @@ async function refreshBoard() {
 }
 
 // ---------------------------------------------------------------- panels
-function freePanel() {
-  return {
-    embeds: [brand(new EmbedBuilder()).setTitle("ECC00 Free").setThumbnail(LOGO)
-      .setDescription("Paste this into your executor. It picks the right script for the game you're in.")
-      .addFields({ name: "Loadstring", value: lua(UNIVERSAL) })],
-  };
+const BANNER = path.join(__dirname, "public", "getkey.gif");
+const PRICES = ["**Weekly** `2.50 USD` · `400 Robux`", "**Monthly** `6 USD` · `800 Robux`", "**Lifetime** `12 USD` · `1,500 Robux`"].join("\n");
+const text = (t) => new TextDisplayBuilder().setContent(t);
+const row = (...b) => new ActionRowBuilder().addComponents(...b);
+const btn = (id, label, style = ButtonStyle.Secondary) => new ButtonBuilder().setCustomId(id).setLabel(label).setStyle(style);
+const link = (label, url) => new ButtonBuilder().setLabel(label).setStyle(ButtonStyle.Link).setURL(url);
+const keyLinks = () => {
+  const g = gate.settings(), free = g.getKeyUrl || "https://eccohub.xyz/key";
+  return [link("Free key", free), link("Basic+ key", g.plusKeyUrl || free)];
+};
+const card = () => new ContainerBuilder().setAccentColor(0xffffff)
+  .addMediaGalleryComponents(new MediaGalleryBuilder().addItems((m) => m.setURL("attachment://getkey.gif").setDescription("ECC00 Hub")));
+const cardMsg = (c) => ({ flags: MessageFlags.IsComponentsV2, components: [c], files: [{ attachment: BANNER, name: "getkey.gif" }], allowedMentions: { parse: [] } });
+
+function getKeyPanel() {
+  return cardMsg(card()
+    .addTextDisplayComponents(text(`## Premium\n${PRICES}\n\nEvery premium feature in every game.`))
+    .addActionRowComponents(row(btn("ticket:buy", "Buy Premium", ButtonStyle.Primary)))
+    .addSeparatorComponents(new SeparatorBuilder())
+    .addTextDisplayComponents(text(`### FREE ACCESS\n**Free** 1 checkpoint, all free features, ${gate.settings().freeKeyHours || 24} hours\n**Basic+** 2 checkpoints, adds FTF Auto Farm, ${gate.settings().freeKeyHours || 24} hours`))
+    .addActionRowComponents(row(...keyLinks()))
+    .addTextDisplayComponents(text("-# Verify first: type the phrase the loader shows you, then paste your key into the loader.")));
 }
 
-function paidPanel() {
-  return {
-    embeds: [brand(new EmbedBuilder()).setTitle("ECC00 Private").setThumbnail(LOGO)
-      .setDescription("For whitelisted members. Your key is tied to your Discord account.")],
-    components: [new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("paid:script").setLabel("Get Script").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId("paid:hwid").setLabel("Reset HWID").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("paid:info").setLabel("Get Info").setStyle(ButtonStyle.Secondary),
-    )],
-  };
+function controlPanel() {
+  return cardMsg(card()
+    .addTextDisplayComponents(text("## ECC00 Hub\nRedeem a key, grab your script and manage your device."))
+    .addActionRowComponents(row(btn("paid:script", "Get Script", ButtonStyle.Primary), btn("paid:redeem", "Redeem Key"), btn("paid:hwid", "Reset HWID"), btn("paid:info", "My Info")))
+    .addSeparatorComponents(new SeparatorBuilder())
+    .addTextDisplayComponents(text(`### LOADSTRING\n${lua(UNIVERSAL)}`))
+    .addSeparatorComponents(new SeparatorBuilder())
+    .addTextDisplayComponents(text("### NEED A KEY?\nFree and Basic+ use checkpoints. Premium opens a ticket."))
+    .addActionRowComponents(row(...keyLinks(), btn("ticket:buy", "Buy Premium"))));
 }
+
+const PLAN_NAME = { free: "Free", "basic+": "Basic+" };
+const planName = (key) => { const p = jnkie.planOf(key); return PLAN_NAME[p] || p[0].toUpperCase() + p.slice(1); };
+// checkpoint keys carry no end date of their own: they last freeKeyHours from creation
+const endsAt = (key) => key.expires_at || (key.is_premium || jnkie.staffKey(key) ? null
+  : new Date(Date.parse(key.created_at) + (gate.settings().freeKeyHours || 24) * 3600_000).toISOString());
+const full = (iso) => (iso ? `<t:${Math.floor(new Date(iso) / 1000)}:f>\n${when(iso)}` : "Never");
 
 function infoEmbed(user, key) {
-  const ok = jnkie.active(key);
+  const linked = [...gate.links].filter(([, l]) => l.discordId === user.id).map(([id]) => `[${id}](https://www.roblox.com/users/${id}/profile)`);
+  const ended = key && endsAt(key) && new Date(endsAt(key)) <= new Date();
+  const status = !key ? "No key" : key.is_invalidated ? "Revoked" : ended ? "Expired" : "Active";
+  const ready = cooldownEnds(user.id);
   return brand(new EmbedBuilder()).setTitle(user.globalName || user.username).setThumbnail(avatar(user))
     .addFields(
-      { name: "Status", value: !key ? "Not whitelisted" : key.is_invalidated ? "Revoked" : jnkie.expired(key) ? "Expired" : "Active", inline: true },
-      { name: "Tier", value: key ? jnkie.tierOf(key) : "-", inline: true },
-      { name: "Expires", value: key && ok ? when(key.expires_at) : "-", inline: true },
-      { name: "HWIDs", value: key ? String(jnkie.hwidsOf(key).length) : "-", inline: true },
-      { name: "Created", value: key ? when(key.created_at) : "-", inline: true },
+      { name: "Plan", value: status === "Active" ? planName(key) : key ? `None (was ${planName(key)})` : "None", inline: true },
+      { name: "Status", value: status, inline: true },
+      { name: status === "Expired" ? "Expired" : "Expires", value: key && !key.is_invalidated ? full(endsAt(key)) : "-", inline: true },
+      { name: "Device", value: !key ? "-" : jnkie.hwidsOf(key).length || gate.isBound(key.key_value) ? "Locked to one device" : "Not used yet", inline: true },
+      { name: "HWID reset", value: ready ? when(ready) : "Ready", inline: true },
+      { name: "Key made", value: key ? full(key.created_at) : "-", inline: true },
+      { name: "Roblox", value: linked.slice(0, 10).join("\n") || "Not linked" },
     );
 }
 
-// Reset HWID is self-service, so it gets a cooldown.
-// ponytail: in-memory, so a redeploy clears it; move to JNKIE key metadata if people abuse that.
-const HWID_COOLDOWN = 24 * 60 * 60_000;
-const lastReset = new Map();
+// Reset HWID is self-service, so it gets a cooldown (/hwidcooldown, minutes, default 1 day), kept in the store
+// so a redeploy doesn't clear it.
+const cooldownMs = () => (store.data.hwidCooldown ?? 1440) * 60_000;
+function cooldownEnds(userId) {
+  const t = ((store.data.hwidResets || {})[userId] || 0) + cooldownMs();
+  return t > Date.now() ? new Date(t).toISOString() : null;
+}
+async function setReset(userId, at) {
+  const r = (store.data.hwidResets ||= {});
+  for (const [id, t] of Object.entries(r)) if (t + cooldownMs() < Date.now()) delete r[id]; // keeps the store small
+  if (at) r[userId] = at; else delete r[userId];
+  await store.save();
+}
+async function resetDevice(key) {
+  await jnkie.resetHwid(key);
+  gate.resetBind(key.key_value); // the loader's own device lock too
+}
+
+const redeemTries = new Map();
+async function redeemModal(i) {
+  const now = Date.now(), t = (redeemTries.get(i.user.id) || []).filter((x) => now - x < 10 * 60_000);
+  if (t.length >= 5) return reply(i, { content: "Too many tries. Wait 10 minutes." });
+  if (redeemTries.size > 10_000) redeemTries.clear();
+  redeemTries.set(i.user.id, [...t, now]);
+  await i.deferReply({ ephemeral: true });
+  const value = i.fields.getTextInputValue("key").trim();
+  if (!/^[\w-]{8,128}$/.test(value)) return i.editReply({ content: "That doesn't look like a key." });
+  let key;
+  try { key = await jnkie.redeem(i.user.id, value); } catch (e) { return i.editReply({ content: e.message }); }
+  redeemTries.delete(i.user.id);
+  const plan = jnkie.planOf(key);
+  if (jnkie.isPaid(plan) && i.guild) await premiumRole(i.guild, i.user.id, true);
+  return i.editReply({ content: `${planName(key)} redeemed. Press Get Script for your loadstring.`, embeds: [infoEmbed(i.user, key)] });
+}
 
 async function paidButton(i, action) {
+  if (action === "redeem") {
+    return i.showModal(new ModalBuilder().setCustomId("redeem").setTitle("Redeem Key").addComponents(row(
+      new TextInputBuilder().setCustomId("key").setLabel("Your key").setStyle(TextInputStyle.Short).setMinLength(8).setMaxLength(128))));
+  }
   await i.deferReply({ ephemeral: true });
   const key = await jnkie.keyFor(i.user.id);
   if (action === "info") return i.editReply({ embeds: [infoEmbed(i.user, key)] });
-  if (!jnkie.active(key)) {
-    return i.editReply({ embeds: [brand(new EmbedBuilder()).setTitle("Not whitelisted")
-      .setDescription("This is for premium members only. Buy access or ask staff.")] });
-  }
+  const ok = jnkie.active(key) && !(endsAt(key) && new Date(endsAt(key)) <= new Date());
   if (action === "script") {
+    const script = ok ? `getgenv().SCRIPT_KEY = "${key.key_value}"\n${UNIVERSAL}` : UNIVERSAL;
     return i.editReply({ embeds: [brand(new EmbedBuilder()).setTitle("Your script").setThumbnail(avatar(i.user))
-      .setDescription("Keep this private. It's locked to your account and device.")
-      .addFields({ name: "Loadstring", value: lua(`getgenv().SCRIPT_KEY = "${key.key_value}"\n${UNIVERSAL}`) })] });
+      .setDescription(ok ? `${planName(key)}. Keep this private, it's locked to your account and device.` : "You have no active key, so this is the plain loader. Get a key, then redeem it or paste it in.")
+      .addFields({ name: "Loadstring", value: lua(script) })] });
   }
   // action === "hwid"
-  const wait = (lastReset.get(i.user.id) || 0) + HWID_COOLDOWN - Date.now();
-  if (wait > 0) return i.editReply({ content: `You can reset again ${when(new Date(Date.now() + wait).toISOString())}.` });
-  await jnkie.resetHwid(key);
-  gate.resetBind(key.key_value); // the loader's own device lock too
-  lastReset.set(i.user.id, Date.now());
+  if (!ok) return i.editReply({ content: "You have no active key. Redeem one first." });
+  const wait = cooldownEnds(i.user.id);
+  if (wait) return i.editReply({ content: `You can reset again ${when(wait)}.` });
+  (store.data.hwidResets ||= {})[i.user.id] = Date.now(); // claimed now, so a double click can't reset twice
+  try { await resetDevice(key); } catch (e) { delete store.data.hwidResets[i.user.id]; throw e; }
+  await setReset(i.user.id, Date.now());
   return i.editReply({ content: "HWID reset. Run the script on your new device." });
+}
+
+// Add or take just the premium role: redeeming or lapsing must never touch dev/staff/owner.
+async function premiumRole(guild, userId, on) {
+  try {
+    const role = guild.roles.cache.find((r) => r.name.toLowerCase() === "premium");
+    if (!role) return;
+    const member = await guild.members.fetch(userId);
+    await (on ? member.roles.add(role) : member.roles.remove(role));
+  } catch (e) { console.error("premium role:", e.message); }
 }
 
 // Give the member a server role named after their tier, if one exists. Best effort.
@@ -415,7 +490,16 @@ const gateChoices = () => [{ name: "Loader (default)", value: "loader" }, { name
 const buildCmds = () => [
   new SlashCommandBuilder().setName("panel").setDescription("Post a panel").setDefaultMemberPermissions(staff)
     .addStringOption((o) => o.setName("type").setDescription("Which panel").setRequired(true)
-      .addChoices({ name: "Free", value: "free" }, { name: "Paid", value: "paid" })),
+      .addChoices({ name: "Control panel", value: "control" }, { name: "Get key", value: "getkey" })),
+  new SlashCommandBuilder().setName("generatekey").setDescription("Make keys people redeem in the panel").setDefaultMemberPermissions(staff)
+    .addStringOption((o) => o.setName("plan").setDescription("Plan").setRequired(true)
+      .addChoices({ name: "Free", value: "free" }, { name: "Basic+", value: "basic+" }, { name: "Premium", value: "premium" }))
+    .addStringOption((o) => o.setName("duration").setDescription("Starts when redeemed: 3d, 1w, 4w, 1y or lifetime").setRequired(true))
+    .addIntegerOption((o) => o.setName("amount").setDescription("How many (default 1)").setMinValue(1).setMaxValue(20)),
+  new SlashCommandBuilder().setName("hwidcooldown").setDescription("How often members can reset their HWID").setDefaultMemberPermissions(staff)
+    .addStringOption((o) => o.setName("duration").setDescription("e.g. 12h or 1d (default 1d)")),
+  new SlashCommandBuilder().setName("tempkeys").setDescription("List premium users on a timed key").setDefaultMemberPermissions(staff)
+    .addUserOption((o) => o.setName("revoke").setDescription("Revoke this user's timed premium")),
   new SlashCommandBuilder().setName("games").setDescription("Show every supported game"),
   new SlashCommandBuilder().setName("features").setDescription("Every game's features, by plan (Basic, Basic+, ECC00 Private)"),
   new SlashCommandBuilder().setName("gamesboard").setDescription("Post a games list that keeps itself up to date").setDefaultMemberPermissions(staff)
@@ -614,8 +698,44 @@ async function onCommand(i) {
       return reply(i, { content: `**${name}** is now ${on ? "free for everyone" : "key-only again"}. Takes effect next time the script loads.` });
     }
     case "panel":
-      await i.channel.send(o.getString("type") === "paid" ? paidPanel() : freePanel());
+      await i.channel.send(o.getString("type") === "control" ? controlPanel() : getKeyPanel());
       return reply(i, { content: "Panel posted." });
+
+    case "generatekey": {
+      await i.deferReply({ ephemeral: true });
+      const plan = o.getString("plan"), minutes = parseDuration(o.getString("duration"));
+      if (minutes === 0 || minutes > 5_256_000) return i.editReply({ content: "Use a duration from 1m to 10y, or lifetime." });
+      const keys = [];
+      let err = "";
+      for (let n = o.getInteger("amount") || 1; n > 0; n--) {
+        try { keys.push(await jnkie.generate(plan, minutes)); } catch (e) { err = `\nStopped early: ${e.message}`; break; }
+      }
+      console.log(`[keys] ${i.user.id} made ${keys.length} ${plan} (${minutes || "lifetime"})`);
+      return i.editReply({ content: keys.length ? `${keys.length} ${plan} key(s), ${o.getString("duration")}. They start when redeemed.\n${lua(keys.join("\n"))}${err}` : `No keys made.${err}` });
+    }
+
+    case "hwidcooldown": {
+      const minutes = parseDuration(o.getString("duration") || "1d");
+      if (minutes === null || minutes > 525_600) return reply(i, { content: "Use a duration up to 1y, e.g. 12h or 1d." });
+      store.data.hwidCooldown = minutes;
+      await store.save();
+      return reply(i, { content: `HWID reset cooldown is now ${o.getString("duration") || "1d"}.` });
+    }
+
+    case "tempkeys": {
+      await i.deferReply({ ephemeral: true });
+      const list = await jnkie.tempKeys();
+      const who = o.getUser("revoke");
+      if (who) {
+        const mine = list.filter((k) => k.discord_id === who.id);
+        for (const k of mine) await jnkie.unwhitelist(k);
+        const left = await jnkie.keyFor(who.id);
+        if (mine.length && !(jnkie.active(left) && jnkie.isPaid(jnkie.planOf(left)))) await premiumRole(i.guild, who.id, false);
+        return i.editReply({ content: `${who}: ${mine.length} timed premium key(s) revoked.` });
+      }
+      const rows = list.map((k) => `${k.discord_id ? `<@${k.discord_id}>` : "no Discord"} ${jnkie.tierOf(k)}, ${k.noEnd ? `no end date (made ${when(k.created_at)}, ${Math.round(k.validity_minutes / 1440 * 10) / 10}d)` : `ends ${when(k.expires_at)}`}`);
+      return i.editReply({ embeds: [brand(new EmbedBuilder()).setTitle(`Timed premium (${list.length})`).setDescription(rows.join("\n").slice(0, 4000) || "Nobody.")] });
+    }
 
     case "games":
       return i.reply({ embeds: [gamesEmbed()] });
@@ -645,12 +765,12 @@ async function onCommand(i) {
       if (sub === "info") return i.editReply({ embeds: [infoEmbed(user, key)] });
       if (!key) return i.editReply({ content: `${user} has no key.` });
       if (sub === "remove") {
-        await jnkie.unwhitelist(key);
+        for (const k of (await jnkie.keysFor(user.id)).filter(jnkie.active)) await jnkie.unwhitelist(k); // every key, not just the main one
         await syncRole(i.guild, user.id, null);
         return i.editReply({ content: `${user}'s access is revoked.` });
       }
-      await jnkie.resetHwid(key); // resethwid
-      lastReset.delete(user.id);
+      await resetDevice(key); // resethwid
+      await setReset(user.id, null);
       return i.editReply({ content: `${user}'s HWID is reset.` });
     }
 
@@ -660,11 +780,13 @@ async function onCommand(i) {
       const key = await jnkie.keyFor(user.id);
       if (!key) return i.editReply({ content: `${user} has no key, so there are no devices to ban.` });
       if (o.getSubcommand() === "add") {
-        const n = await jnkie.blacklist(key, o.getString("reason"));
+        let n = 0;
+        for (const k of await jnkie.keysFor(user.id)) n += await jnkie.blacklist(k, o.getString("reason"));
         await syncRole(i.guild, user.id, null);
         return i.editReply({ content: `${user} blacklisted: key revoked, ${n} HWID(s) banned.` });
       }
-      const n = await jnkie.unblacklist(key);
+      let n = 0;
+      for (const k of await jnkie.keysFor(user.id)) n += await jnkie.unblacklist(k);
       return i.editReply({ content: `${user}: ${n} HWID(s) unbanned. Use /whitelist add to give access back.` });
     }
 
@@ -866,8 +988,9 @@ async function ticketButton(i, action) {
   });
   await ch.send({
     content: `${i.user}`,
-    embeds: [brand(new EmbedBuilder()).setTitle("Ticket opened")
-      .setDescription("Tell us what you need and staff will be with you soon. Press Close when you're done.")],
+    embeds: [brand(new EmbedBuilder()).setTitle(action === "buy" ? "Buy Premium" : "Ticket opened")
+      .setDescription(action === "buy" ? `${PRICES}\n\nSay which length you want and how you'd like to pay. Staff will be with you soon.`
+        : "Tell us what you need and staff will be with you soon. Press Close when you're done.")],
     components: [new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId("ticket:close").setLabel("Close").setStyle(ButtonStyle.Danger))],
   });
@@ -881,6 +1004,7 @@ client.on(Events.InteractionCreate, async (i) => {
   try {
     if (i.isChatInputCommand()) return await onCommand(i);
     if (i.isStringSelectMenu() && i.customId === "features") return await i.update({ embeds: [featuresEmbed(i.values[0])], components: [featuresMenu()] });
+    if (i.isModalSubmit() && i.customId === "redeem") return await redeemModal(i);
     if (i.isButton() && i.customId.startsWith("paid:")) return await paidButton(i, i.customId.slice(5));
     if (i.isButton() && i.customId.startsWith("ticket:")) return await ticketButton(i, i.customId.slice(7));
   } catch (e) {
@@ -889,35 +1013,33 @@ client.on(Events.InteractionCreate, async (i) => {
   }
 });
 
-// Sticky key message in the verify channel: every 10 min the old one goes and a fresh one sits at the bottom,
-// with a button to the key page (the gate's get-key link: the JNKIE / Lootlabs flow).
+// Get-key card in the verify channel: every 100 min the old one goes and a fresh one sits at the bottom.
+const STICKY_MIN = 100;
 async function verifySticky() {
   const g = gate.settings();
-  if (!g.verifyChannel || !g.getKeyUrl) return;
+  if (!g.verifyChannel) return;
   const ch = client.channels.cache.get(g.verifyChannel) || await client.channels.fetch(g.verifyChannel).catch(() => null);
   if (!ch) return;
   const recent = await ch.messages.fetch({ limit: 30 }).catch(() => null);
-  for (const m of recent?.values() || []) if (m.author.id === client.user.id && m.embeds[0]?.title === "Get your ECC00 key") await m.delete().catch(() => {});
-  const msg = await ch.send({
-    embeds: [brand(new EmbedBuilder()).setTitle("Get your ECC00 key").setThumbnail(LOGO)
-      .setDescription([
-        "Some games need a key as well as this verify step.",
-        "1. Type the phrase the loader shows you here.",
-        "2. Pick a key, finish the steps, copy your key.",
-        "3. Paste it into the ECC00 loader.",
-        "",
-        "**Basic**: 1 checkpoint, every free feature.",
-        "**Basic+**: 2 checkpoints, Basic plus FTF Auto Farm.",
-        "Both last 24 hours. Press Get Key to pick one.",
-      ].join("\n"))],
-    components: [new ActionRowBuilder().addComponents(
-      // one Get Key button when both plans share a page (eccohub.xyz/key offers both)
-      new ButtonBuilder().setLabel(g.plusKeyUrl && g.plusKeyUrl !== g.getKeyUrl ? "Basic key" : "Get Key").setStyle(ButtonStyle.Link).setURL(g.getKeyUrl),
-      ...(g.plusKeyUrl && g.plusKeyUrl !== g.getKeyUrl ? [new ButtonBuilder().setLabel("Basic+ key").setStyle(ButtonStyle.Link).setURL(g.plusKeyUrl)] : []),
-    )],
-  });
+  for (const m of recent?.values() || []) {
+    if (m.author.id === client.user.id && (m.id === store.data.verifySticky || m.embeds[0]?.title === "Get your ECC00 key")) await m.delete().catch(() => {});
+  }
+  const msg = await ch.send(getKeyPanel());
   store.data.verifySticky = msg.id;
   await store.save();
+}
+
+// Hourly: anyone whose paid keys have all ended loses their tier role.
+async function dropLapsed() {
+  const guild = store.home(client);
+  if (!guild || !jnkie.ready()) return;
+  const ids = await jnkie.lapsed();
+  const premium = guild.roles.cache.find((r) => r.name.toLowerCase() === "premium");
+  if (!premium) return;
+  for (let n = 0; n < ids.length; n += 100) { // only the premium role: dev/staff/owner are given by hand
+    const members = await guild.members.fetch({ user: ids.slice(n, n + 100) });
+    for (const m of members.values()) if (m.roles.cache.has(premium.id)) await m.roles.remove(premium).catch((e) => console.error("lapsed role:", e.message));
+  }
 }
 
 client.once(Events.ClientReady, async () => {
@@ -931,7 +1053,10 @@ client.once(Events.ClientReady, async () => {
   tracker.start(client, brand);
   refreshBoard().catch((e) => console.error("games board:", e.message)); // catches lists changed by a deploy
   verifySticky().catch((e) => console.error("verify sticky:", e.message));
-  setInterval(() => verifySticky().catch((e) => console.error("verify sticky:", e.message)), 10 * 60_000);
+  setInterval(() => verifySticky().catch((e) => console.error("verify sticky:", e.message)), STICKY_MIN * 60_000);
+  const sweep = () => dropLapsed().catch((e) => console.error("lapsed:", e.message));
+  sweep();
+  setInterval(sweep, 60 * 60_000);
 });
 
 require("./spotify")(app, express, limited); // Spotify addon: /spotify login, /api/spotify/*
