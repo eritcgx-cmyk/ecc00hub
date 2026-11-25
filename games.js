@@ -12,4 +12,5 @@ module.exports = [
   { key: "sols",     name: "Sol's RNG", place: 15532962292 },
   { key: "chessduels", name: "RoChess", place: 89083628291452 },
   { key: "catboy",   name: "Raise A Catboy", place: 129852792970565 },
+  { key: "freedraw", name: "Free Draw", place: 1547610457, freemium: true },
 ];

@@ -20,6 +20,7 @@ gate._setForTest({ send: async () => ({ delete: async () => {} }) }, [
   { key: "ftf", name: "Flee the Facility", file: "ftf.lua", places: [893973440] },
   { key: "mm2", name: "Murder Mystery 2", file: "mm2.lua", places: [142823291] },
   { key: "da_hood", name: "Da Hood", file: "dahood.lua", places: [2788229376], paid: true },
+  { key: "freedraw", name: "Free Draw", file: "freedraw.lua", places: [1547610457], min: "basic+" },
 ]);
 const s = gate.settings();
 const ask = (o) => gate.session(client, { robloxId: "1", hwid: "pc-a", placeId: "893973440", ...o });
@@ -63,6 +64,17 @@ const ask = (o) => gate.session(client, { robloxId: "1", hwid: "pc-a", placeId: 
 
   assert.equal((await ask({ placeId: "2788229376", key: "FREEKEY0001", hwid: "pc-a" })).need, "key", "paid game refuses free keys");
   assert.ok((await ask({ placeId: "2788229376", key: "PREMIUMKEY1" })).ok, "paid game takes premium");
+  // Free Draw (min basic+): nothing below Basic+ gets a ticket, Basic+ gets no premium flag
+  const fd = (key) => ask({ placeId: "1547610457", key });
+  s.modes.freedraw = "keyless";
+  assert.equal((await fd()).need, "key", "Free Draw never opens without a key, whatever the mode says");
+  assert.match((await fd("FREEKEY0001")).reason, /Basic\+ or Premium/, "Free Draw refuses free keys");
+  r = await fd("BASICPLUS01");
+  assert.ok(r.ok && !r.premium && JSON.parse(Buffer.from(r.ticket.split(".")[0], "base64url").toString()).p === 0, "Basic+ opens Free Draw without premium");
+  r = await fd("PREMIUMKEY1");
+  assert.ok(r.ok && r.premium && JSON.parse(Buffer.from(r.ticket.split(".")[0], "base64url").toString()).p === 1, "Premium opens Free Draw with premium");
+  s.testerCode = "testercode123";
+  assert.equal((await fd("testercode123")).need, "key", "the tester code is a free user, so it stays out of Free Draw");
   // ScriptBlox tester code: skips Discord and the device lock, never premium
   s.testerCode = "testercode123";
   s.modes.ftf = "discord";

@@ -173,7 +173,7 @@ async function session(client, b) {
   // the loader's game picker can ask for Universal instead of the detected game
   const game = b.want === "universal" ? UNIVERSAL : (games.byPlace.get(String(b.placeId)) || UNIVERSAL);
   if (s.off[game.key]) return { ok: false, reason: `${game.name} is turned off right now.` };
-  const mode = game.paid ? "keyed" : (s.modes[game.key] || s.defaultMode || "discord");
+  const mode = game.paid || game.min ? "keyed" : (s.modes[game.key] || s.defaultMode || "discord");
   const about = { mode, game: game.key, name: game.name }; // every answer says which game, so the loader can show it
 
   // a key always counts, in any mode: it's how premium unlocks
@@ -212,6 +212,8 @@ async function session(client, b) {
   // unlocks Auto Farm (the ticket's b flag).
   const premium = jnkie.isPaid(tier) || Boolean(store.data.freePremium[game.key]);
   if (game.paid && !premium) return { ok: false, need: "key", getKey: KEY_PAGE, reason: `${game.name} needs a premium key.`, ...about };
+  // min: "basic+" games (Free Draw) open with a Basic+ or premium key only
+  if (game.min === "basic+" && !premium && tier !== "basic+") return { ok: false, need: "key", getKey: KEY_PAGE, reason: `${game.name} needs a Basic+ or Premium key.`, ...about };
 
   const plan = premium ? "ECC00 Private" : tier === "basic+" ? "Basic+" : keyed ? "Basic" : "Keyless";
   // the exec-log reads these server-side, so a spoofed /api/exec POST can't claim a plan the gate didn't grant
