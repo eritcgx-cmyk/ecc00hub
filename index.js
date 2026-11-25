@@ -961,16 +961,23 @@ async function onCommand(i) {
 // ---------------------------------------------------------------- tickets
 // One private channel per member under a "Tickets" category. The member and every role that can manage the
 // server see it; the channel topic remembers whose ticket it is, so nothing is stored.
+const opening = new Set();
 async function ticketButton(i, action) {
+  if (action === "close") return openTicket(i, action);
+  if (opening.has(i.user.id)) return reply(i, { content: "Already opening your ticket." }); // double click
+  opening.add(i.user.id);
+  try { return await openTicket(i, action); } finally { opening.delete(i.user.id); }
+}
+async function openTicket(i, action) {
   const guild = i.guild;
   if (action === "close") {
     if (!(i.channel.topic || "").startsWith("ticket:")) return reply(i, { content: "This isn't a ticket." });
     await i.reply({ content: "Closing in 5 seconds." });
     return setTimeout(() => i.channel.delete().catch(() => {}), 5000);
   }
-  await i.deferReply({ ephemeral: true });
   const open = guild.channels.cache.find((c) => c.topic === `ticket:${i.user.id}`);
-  if (open) return i.editReply(`You already have a ticket: ${open}`);
+  if (open) return reply(i, { content: `You already have a ticket: ${open}` });
+  await reply(i, { content: "Opening your ticket. You'll be pinged in it." }); // answered now: making the channel can be slow
   let cat = guild.channels.cache.find((c) => c.type === ChannelType.GuildCategory && c.name === "Tickets");
   if (!cat) {
     cat = await guild.channels.create({ name: "Tickets", type: ChannelType.GuildCategory,
@@ -995,7 +1002,7 @@ async function ticketButton(i, action) {
     components: [new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId("ticket:close").setLabel("Close").setStyle(ButtonStyle.Danger))],
   });
-  return i.editReply(`Ticket opened: ${ch}`);
+  i.editReply(`Ticket opened: ${ch}`).catch(() => {}); // nice to have, the ping is what counts
 }
 
 client.on(Events.MessageCreate, (m) => gate.onMessage(m).catch((e) => console.error("verify:", e.message)));

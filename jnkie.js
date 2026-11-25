@@ -152,7 +152,14 @@ async function redeem(discordId, value) {
       const ends = minutes ? until(minutes, Date.parse(mine.expires_at)) : null;
       await api("PUT", `/keys/${key.id}`, { key_name: "ECC00 redeemed", is_invalidated: true });
       try { await write(mine.id, deadline(ends)); }
-      catch (e) { await api("PUT", `/keys/${key.id}`, { key_name: key.key_name }); throw e; }
+      catch (e) { // give the key back only if the time really wasn't added, or it could be spent twice
+        const now = await api("GET", `/keys/${mine.id}`).then((d) => d.key).catch(() => null);
+        if (!now) throw new Error("JNKIE stopped answering. Open a ticket so staff can check your time.");
+        if (now.expires_at && Math.abs(Date.parse(now.expires_at) - Date.parse(mine.expires_at)) < 120_000) {
+          await api("PUT", `/keys/${key.id}`, { key_name: key.key_name });
+          throw e;
+        }
+      }
       return { ...mine, expires_at: ends };
     }
     const set = {

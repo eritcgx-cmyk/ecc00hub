@@ -47,6 +47,13 @@ const row = (v) => db.find((x) => x.key_value === v);
   const both = await Promise.allSettled([j.redeem("300", c), j.redeem("400", c)]);
   assert.equal(both.filter((r) => r.status === "fulfilled").length, 1, "two people can't redeem one key");
 
+  // the time was added but the read-back failed: the new key must stay used up
+  const e1 = await j.generate("premium", 1440);
+  let gets = 0;
+  fail = (m, o) => m === "GET" && o?.key_value === a && ++gets === 1;
+  await j.redeem("100", e1);
+  fail = null;
+  assert.ok(!j.isPending(row(e1)) && days(row(a)) === 11, "added time can't be spent twice");
   // expiry
   row(a).expires_at = new Date(Date.now() - 1).toISOString();
   assert.ok(!j.active(await j.keyFor("100")));
