@@ -29,6 +29,7 @@ const jnkie = require("./jnkie");
 const tracker = require("./tracker");
 const gate = require("./gate");
 const changelog = require("./changelog");
+const lazy = require("./lazy");
 
 const { DISCORD_BOT_TOKEN, PORT = 10000 } = process.env;
 const PUBLIC_URL = (process.env.PUBLIC_URL || "").replace(/\/$/, ""); // this service's own https url
@@ -257,7 +258,9 @@ app.get("/health/jnkie", (req, res) => limited(req, "jnkie", 5, 60_000) ? res.st
 // ---------------------------------------------------------------- shared bits
 // GuildMessages + MessageContent read phrases typed in the verify channel; GuildMembers sees people leave.
 // MessageContent and GuildMembers are "privileged": they must be switched on in the Discord Developer Portal.
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers] });
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers],
+  rest: { rejectOnRateLimit: (d) => d.route.startsWith("/webhooks") && d.retryAfter > 10_000 } }); // fail loudly, never wait for hours
+client.rest.on("rateLimited", (d) => console.error("rate limited:", d.method, d.route, d.retryAfter + "ms", d.scope, d.global ? "global" : ""));
 const UNIVERSAL = `loadstring(game:HttpGet("${HUB_LOADER}"))()`;
 const freeGames = () => allGames().filter((g) => !g.paid && !g.freemium && !g.soon);
 const freemiumGames = () => allGames().filter((g) => g.freemium && !g.paid && !g.soon);
@@ -1001,6 +1004,7 @@ client.on(Events.MessageCreate, (m) => gate.onMessage(m).catch((e) => console.er
 client.on(Events.GuildMemberRemove, gate.onLeave);
 
 client.on(Events.InteractionCreate, async (i) => {
+  lazy(i);
   const what = i.commandName || i.customId || "?";
   const slow = setTimeout(() => { // never leave anyone on "thinking"
     console.error("slow interaction:", what);
