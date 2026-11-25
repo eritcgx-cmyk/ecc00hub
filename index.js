@@ -1001,6 +1001,11 @@ client.on(Events.MessageCreate, (m) => gate.onMessage(m).catch((e) => console.er
 client.on(Events.GuildMemberRemove, gate.onLeave);
 
 client.on(Events.InteractionCreate, async (i) => {
+  const what = i.commandName || i.customId || "?";
+  const slow = setTimeout(() => { // never leave anyone on "thinking"
+    console.error("slow interaction:", what);
+    if (i.deferred && !i.replied) i.editReply({ content: `${what} is taking too long. Try again in a minute.` }).catch((e) => console.error("slow reply:", e.message));
+  }, 30_000);
   try {
     if (i.isChatInputCommand()) return await onCommand(i);
     if (i.isStringSelectMenu() && i.customId === "features") return await i.update({ embeds: [featuresEmbed(i.values[0])], components: [featuresMenu()] });
@@ -1008,9 +1013,9 @@ client.on(Events.InteractionCreate, async (i) => {
     if (i.isButton() && i.customId.startsWith("paid:")) return await paidButton(i, i.customId.slice(5));
     if (i.isButton() && i.customId.startsWith("ticket:")) return await ticketButton(i, i.customId.slice(7));
   } catch (e) {
-    console.error("interaction:", e.message);
-    if (i.isRepliable()) reply(i, { content: "Something broke: " + e.message }).catch(() => {});
-  }
+    console.error("interaction:", what, e.code || "", e.message); // 40060/10062 = another copy of the bot answered first
+    if (i.isRepliable()) reply(i, { content: "Something broke: " + e.message }).catch((x) => console.error("error reply:", what, x.message));
+  } finally { clearTimeout(slow); }
 });
 
 // Get-key card in the verify channel: every 100 min the old one goes and a fresh one sits at the bottom.

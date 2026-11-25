@@ -13,6 +13,7 @@ async function api(method, path, body) {
     method,
     headers: { Authorization: `Bearer ${process.env.JNKIE_API_KEY}`, "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(15_000), // a stuck request must fail, not leave Discord on "thinking"
   });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.error || data.message || `JNKIE ${r.status}`);
