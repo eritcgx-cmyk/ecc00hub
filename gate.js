@@ -186,16 +186,12 @@ async function session(client, b) {
     try { k = await jnkie.keyByValue(b.key); }
     catch { return { ok: false, need: "retry", reason: "Can't check keys right now. Try again in a minute.", ...about }; } // outage isn't a bad key
     if (jnkie.isPending(k)) return { ok: false, need: "key", getKey: KEY_PAGE, reason: "Redeem this key in the Discord panel first.", ...about };
-    if (!jnkie.active(k)) return { ok: false, need: "key", getKey: KEY_PAGE, reason: "That key is invalid or expired.", ...about };
+    if (!jnkie.active(k)) return { ok: false, need: "key", getKey: KEY_PAGE, reason: "That key is invalid or expired. Get a new one.", ...about };
     if (!(await bindKey(b.key, hwid))) return { ok: false, need: "key", getKey: KEY_PAGE, reason: "This key is locked to another device. Reset HWID in the Discord panel.", ...about };
-    // free checkpoint keys aren't premium and only last s.freeKeyHours (set from the PC terminal)
-    if (!k.is_premium && !jnkie.staffKey(k) && Date.parse(k.created_at) + (s.freeKeyHours || 24) * 3600_000 < Date.now()) {
-      return { ok: false, need: "key", getKey: KEY_PAGE, reason: "Your free key ran out. Get a new one.", ...about };
-    }
     keyed = true;
     // Basic+ keys come from their own JNKIE provider (2 Lootlabs checkpoints): it unlocks Auto Farm
     tier = jnkie.planOf(k);
-    ends = k.expires_at ? Math.floor(Date.parse(k.expires_at) / 1000) : null;
+    ends = jnkie.endsAt(k) ? Math.floor(Date.parse(jnkie.endsAt(k)) / 1000) : null;
     profile = await profileOf(client, k.discord_id);
   }
 

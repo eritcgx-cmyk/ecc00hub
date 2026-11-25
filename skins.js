@@ -71,7 +71,7 @@ module.exports = function (app, express, client) {
   });
 
   app.post("/api/mm2/skins", express.json({ limit: "32kb" }), (req, res) => {
-    const ip = req.headers["x-forwarded-for"]?.split(",")[0] || req.ip;
+    const ip = req.headers["cf-connecting-ip"] || req.headers["x-forwarded-for"]?.split(",")[0] || req.ip;
     if (Date.now() - (lastPost.get(ip) || 0) < 15_000) return res.status(429).json({ ok: false });
     lastPost.set(ip, Date.now());
     let added = 0;

@@ -1,6 +1,7 @@
 // JNKIE REST API v2 (docs.jnkie.com/rest-api). The whitelist IS JNKIE: one premium key per Discord user,
 // tied to them with discord_id, so the script gets their name/avatar through JD_* runtime vars and the
 // bot can look them up, reset their HWID, or ban them without a database of our own.
+const store = require("./store");
 const BASE = "https://api.jnkie.com/api/v2";
 const PROVIDER_ID = Number(process.env.JNKIE_PROVIDER_ID || 29015); // "ECC00 Premium", covers every service
 const BASIC_PLUS_PROVIDER = Number(process.env.JNKIE_BASICPLUS_PROVIDER_ID || 32149);
@@ -33,13 +34,20 @@ const planOf = (key) => key.is_premium ? tierOf(key)
   : /basic\s*\+|plus/i.test(key.provider_name || "") ? "basic+" : "free";
 const isPaid = (plan) => plan !== "free" && plan !== "basic+";
 
-const expired = (key) => key.expires_at && new Date(key.expires_at) <= new Date();
+// When a key stops. Checkpoint keys last freeKeyHours from creation, whatever end date JNKIE gave them.
+function endsAt(key) {
+  const made = Date.parse(key.created_at);
+  if (key.is_premium || staffKey(key) || !made) return key.expires_at || null;
+  const cap = made + (store.data.gate?.freeKeyHours || 24) * 3600_000;
+  return new Date(Math.min(cap, key.expires_at ? Date.parse(key.expires_at) : Infinity)).toISOString();
+}
+const expired = (key) => { const e = endsAt(key); return Boolean(e && new Date(e) <= new Date()); };
 const active = (key) => Boolean(key && !key.is_invalidated && !expired(key));
 
 const keysFor = async (discordId) => (await api("GET", `/keys?discord_id=${discordId}&limit=100`)).keys || [];
 // A user's main key: active beats dead, then the better plan, then the later end, then the newer one.
 const rank = (k) => [active(k) ? 1 : 0, isPaid(planOf(k)) ? 2 : planOf(k) === "basic+" ? 1 : 0,
-  k.expires_at ? Date.parse(k.expires_at) : Infinity, Date.parse(k.created_at) || 0];
+  endsAt(k) ? Date.parse(endsAt(k)) : Infinity, Date.parse(k.created_at) || 0];
 function best(keys) {
   return [...keys].sort((a, b) => {
     const x = rank(a), y = rank(b), n = x.findIndex((v, i) => v !== y[i]);
@@ -67,6 +75,23 @@ const until = (minutes, from = Date.now()) => (minutes ? new Date(from + minutes
 // expires_at is the only deadline the bot trusts, so every write sets it (null = forever)
 const deadline = (iso) => ({ expires_at: iso, validity_minutes: null, expiry_on_first_use: false });
 
+// Write, then read back: JNKIE silently ignoring a field would mean a 3 day key that never ends. If the end date
+// or the dead/alive state didn't stick, try that field alone once, then say so.
+async function write(id, set) {
+  await api("PUT", `/keys/${id}`, set);
+  const wrong = async () => {
+    const { key } = await api("GET", `/keys/${id}`);
+    const bad = {};
+    if ("expires_at" in set && Math.abs((Date.parse(key.expires_at) || 0) - (Date.parse(set.expires_at) || 0)) > 120_000) bad.expires_at = set.expires_at;
+    if ("is_invalidated" in set && Boolean(key.is_invalidated) !== set.is_invalidated) bad.is_invalidated = set.is_invalidated;
+    return Object.keys(bad).length ? bad : null;
+  };
+  const bad = await wrong();
+  if (!bad) return;
+  await api("PUT", `/keys/${id}`, bad);
+  if (await wrong()) throw new Error(`JNKIE didn't save ${Object.keys(bad).join(", ")}. Tell staff.`);
+}
+
 // Add or renew. Reuses the existing premium key so the user's saved loadstring keeps working.
 async function whitelist(discordId, tier, minutes) {
   const set = { key_name: TIER_PREFIX + tier, is_premium: true, is_invalidated: false, ...deadline(until(minutes)) };
@@ -81,7 +106,7 @@ async function whitelist(discordId, tier, minutes) {
       hwid_limit: 1,
     }));
   }
-  await api("PUT", `/keys/${existing.id}`, set);
+  await write(existing.id, set);
   return { ...existing, ...set };
 }
 
@@ -98,7 +123,7 @@ async function generate(plan, minutes) {
     validity_minutes: null,
     hwid_limit: 1,
   });
-  try { await api("PUT", `/keys/${key.id}`, { is_invalidated: true }); }
+  try { await write(key.id, { is_invalidated: true }); }
   catch (e) { await api("DELETE", `/keys/${key.id}`).catch(() => {}); throw e; } // never leave a live one behind
   return key.key_value;
 }
@@ -126,7 +151,7 @@ async function redeem(discordId, value) {
     if (mine) {
       const ends = minutes ? until(minutes, Date.parse(mine.expires_at)) : null;
       await api("PUT", `/keys/${key.id}`, { key_name: "ECC00 redeemed", is_invalidated: true });
-      try { await api("PUT", `/keys/${mine.id}`, deadline(ends)); }
+      try { await write(mine.id, deadline(ends)); }
       catch (e) { await api("PUT", `/keys/${key.id}`, { key_name: key.key_name }); throw e; }
       return { ...mine, expires_at: ends };
     }
@@ -137,7 +162,11 @@ async function redeem(discordId, value) {
       discord_id: String(discordId),
       ...deadline(until(minutes)),
     };
-    await api("PUT", `/keys/${key.id}`, set);
+    try { await write(key.id, set); }
+    catch (e) { // back to unredeemed, so it's neither lost nor live without its end date
+      await api("PUT", `/keys/${key.id}`, { key_name: key.key_name, is_invalidated: true, is_premium: false, discord_id: null });
+      throw e;
+    }
     return { ...key, ...set };
   } finally { redeeming.delete(value); redeeming.delete(discordId); }
 }
@@ -194,4 +223,4 @@ async function unblacklist(key) {
 // Cheap authenticated call, so a bad key shows up as an error instead of "configured".
 const ping = () => api("GET", "/services").then((d) => (d.services || d).length);
 
-module.exports = { best, isPaid, isPending, staffKey, keysFor, generate, redeem, tempKeys, lapsed, planOf, ready, ping, keyFor, keyByValue, whitelist, basicPlusKey, unwhitelist, resetHwid, blacklist, unblacklist, tierOf, active, expired, hwidsOf };
+module.exports = { endsAt, best, isPaid, isPending, staffKey, keysFor, generate, redeem, tempKeys, lapsed, planOf, ready, ping, keyFor, keyByValue, whitelist, basicPlusKey, unwhitelist, resetHwid, blacklist, unblacklist, tierOf, active, expired, hwidsOf };

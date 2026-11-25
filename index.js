@@ -273,12 +273,12 @@ const column = (games) => games.map((g) => "\u25B8 " + g.name).join("\n") || "-"
 const when = (iso) => (iso ? `<t:${Math.floor(new Date(iso) / 1000)}:R>` : "Never");
 const reply = (i, body) => (i.deferred || i.replied ? i.editReply(body) : i.reply({ ...body, ephemeral: true }));
 
-// "7d", "12h", "30m", "lifetime" -> minutes (null = forever)
+// "7d", "12h", "30m", "1 month", "lifetime" -> minutes (null = forever)
 function parseDuration(s) {
   if (!s || /^(life|perm|forever|lifetime)/i.test(s)) return null;
-  const m = /^(\d+)\s*([mhdwy])/i.exec(s.trim());
-  if (!m) throw new Error(`Can't read duration "${s}". Use 30m, 12h, 7d, 4w, 1y or lifetime.`);
-  return Number(m[1]) * { m: 1, h: 60, d: 1440, w: 10080, y: 525600 }[m[2].toLowerCase()];
+  const m = /^(\d+)\s*(mo|[mhdwy])[a-z]*$/i.exec(s.trim());
+  if (!m) throw new Error(`Can't read duration "${s}". Use 30m, 12h, 7d, 4w, 1mo, 1y or lifetime.`);
+  return Number(m[1]) * { m: 1, h: 60, d: 1440, w: 10080, mo: 43200, y: 525600 }[m[2].toLowerCase()];
 }
 
 // ---------------------------------------------------------------- games list
@@ -363,15 +363,12 @@ function controlPanel() {
 
 const PLAN_NAME = { free: "Free", "basic+": "Basic+" };
 const planName = (key) => { const p = jnkie.planOf(key); return PLAN_NAME[p] || p[0].toUpperCase() + p.slice(1); };
-// checkpoint keys carry no end date of their own: they last freeKeyHours from creation
-const endsAt = (key) => key.expires_at || (key.is_premium || jnkie.staffKey(key) ? null
-  : new Date(Date.parse(key.created_at) + (gate.settings().freeKeyHours || 24) * 3600_000).toISOString());
+const { endsAt } = jnkie;
 const full = (iso) => (iso ? `<t:${Math.floor(new Date(iso) / 1000)}:f>\n${when(iso)}` : "Never");
 
 function infoEmbed(user, key) {
   const linked = [...gate.links].filter(([, l]) => l.discordId === user.id).map(([id]) => `[${id}](https://www.roblox.com/users/${id}/profile)`);
-  const ended = key && endsAt(key) && new Date(endsAt(key)) <= new Date();
-  const status = !key ? "No key" : key.is_invalidated ? "Revoked" : ended ? "Expired" : "Active";
+  const status = !key ? "No key" : key.is_invalidated ? "Revoked" : jnkie.expired(key) ? "Expired" : "Active";
   const ready = cooldownEnds(user.id);
   return brand(new EmbedBuilder()).setTitle(user.globalName || user.username).setThumbnail(avatar(user))
     .addFields(
@@ -428,7 +425,7 @@ async function paidButton(i, action) {
   await i.deferReply({ ephemeral: true });
   const key = await jnkie.keyFor(i.user.id);
   if (action === "info") return i.editReply({ embeds: [infoEmbed(i.user, key)] });
-  const ok = jnkie.active(key) && !(endsAt(key) && new Date(endsAt(key)) <= new Date());
+  const ok = jnkie.active(key);
   if (action === "script") {
     const script = ok ? `getgenv().SCRIPT_KEY = "${key.key_value}"\n${UNIVERSAL}` : UNIVERSAL;
     return i.editReply({ embeds: [brand(new EmbedBuilder()).setTitle("Your script").setThumbnail(avatar(i.user))
@@ -497,7 +494,7 @@ const buildCmds = () => [
   new SlashCommandBuilder().setName("generatekey").setDescription("Make keys people redeem in the panel").setDefaultMemberPermissions(staff)
     .addStringOption((o) => o.setName("plan").setDescription("Plan").setRequired(true)
       .addChoices({ name: "Free", value: "free" }, { name: "Basic+", value: "basic+" }, { name: "Premium", value: "premium" }))
-    .addStringOption((o) => o.setName("duration").setDescription("Starts when redeemed: 3d, 1w, 4w, 1y or lifetime").setRequired(true))
+    .addStringOption((o) => o.setName("duration").setDescription("Starts when redeemed: 3d, 1w, 1mo, 1y or lifetime").setRequired(true))
     .addIntegerOption((o) => o.setName("amount").setDescription("How many (default 1)").setMinValue(1).setMaxValue(20)),
   new SlashCommandBuilder().setName("hwidcooldown").setDescription("How often members can reset their HWID").setDefaultMemberPermissions(staff)
     .addStringOption((o) => o.setName("duration").setDescription("e.g. 12h or 1d (default 1d)")),
@@ -701,6 +698,7 @@ async function onCommand(i) {
       return reply(i, { content: `**${name}** is now ${on ? "free for everyone" : "key-only again"}. Takes effect next time the script loads.` });
     }
     case "panel":
+      await i.deferReply({ ephemeral: true }); // the banner upload can take a few seconds
       await i.channel.send(o.getString("type") === "control" ? controlPanel() : getKeyPanel());
       return reply(i, { content: "Panel posted." });
 
@@ -708,11 +706,11 @@ async function onCommand(i) {
       await i.deferReply({ ephemeral: true });
       const plan = o.getString("plan"), minutes = parseDuration(o.getString("duration"));
       if (minutes === 0 || minutes > 5_256_000) return i.editReply({ content: "Use a duration from 1m to 10y, or lifetime." });
-      const keys = [];
-      let err = "";
-      for (let n = o.getInteger("amount") || 1; n > 0; n--) {
-        try { keys.push(await jnkie.generate(plan, minutes)); } catch (e) { err = `\nStopped early: ${e.message}`; break; }
-      }
+      // all at once, so the reply is quick and never has to go through the slow route
+      const made = await Promise.allSettled(Array.from({ length: o.getInteger("amount") || 1 }, () => jnkie.generate(plan, minutes)));
+      const keys = made.filter((r) => r.status === "fulfilled").map((r) => r.value);
+      const bad = made.filter((r) => r.status === "rejected");
+      const err = bad.length ? `\n${bad.length} failed: ${bad[0].reason.message}` : "";
       console.log(`[keys] ${i.user.id} made ${keys.length} ${plan} (${minutes || "lifetime"})`);
       return i.editReply({ content: keys.length ? `${keys.length} ${plan} key(s), ${o.getString("duration")}. They start when redeemed.\n${lua(keys.join("\n"))}${err}` : `No keys made.${err}` });
     }
@@ -1030,8 +1028,9 @@ async function verifySticky() {
   const ch = client.channels.cache.get(g.verifyChannel) || await client.channels.fetch(g.verifyChannel).catch(() => null);
   if (!ch) return;
   const recent = await ch.messages.fetch({ limit: 30 }).catch(() => null);
+  if (store.data.verifySticky) await ch.messages.delete(store.data.verifySticky).catch(() => {}); // however far up it is
   for (const m of recent?.values() || []) {
-    if (m.author.id === client.user.id && (m.id === store.data.verifySticky || m.embeds[0]?.title === "Get your ECC00 key")) await m.delete().catch(() => {});
+    if (m.author.id === client.user.id && m.embeds[0]?.title === "Get your ECC00 key") await m.delete().catch(() => {});
   }
   const msg = await ch.send(getKeyPanel());
   store.data.verifySticky = msg.id;

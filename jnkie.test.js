@@ -1,7 +1,7 @@
 // node jnkie.test.js  -- generate, redeem, renew and expiry against a fake JNKIE
 process.env.JNKIE_API_KEY = "x";
 const assert = require("assert");
-let db = [], id = 0, fail = null;
+let db = [], id = 0, fail = null, drop = null;
 global.fetch = async (url, { method, body }) => {
   const u = new URL(url), b = body && JSON.parse(body), one = db.find((k) => u.pathname.endsWith("/keys/" + k.id));
   const ok = (d) => ({ ok: true, json: async () => d });
@@ -11,8 +11,9 @@ global.fetch = async (url, { method, body }) => {
     db.push(k);
     return ok({ key: { ...k } });
   }
-  if (method === "PUT") { Object.assign(one, b); return ok({ success: true }); }
+  if (method === "PUT") { Object.assign(one, b, drop && drop(b)); return ok({ success: true }); }
   if (method === "DELETE") { db = db.filter((k) => k !== one); return ok({}); }
+  if (one) return ok({ key: { ...one } });
   const q = u.searchParams;
   const keys = db.filter((k) => (!q.get("discord_id") || k.discord_id === q.get("discord_id")) && (!q.get("key") || k.key_value.includes(q.get("key"))));
   return ok({ keys: keys.map((k) => ({ ...k })), pagination: { totalPages: 1 } });
@@ -66,5 +67,14 @@ const row = (v) => db.find((x) => x.key_value === v);
   await j.whitelist("600", "premium", null);
   assert.ok((await j.keysFor("600")).length === 1 && !(await j.keyFor("600")).expires_at);
   assert.ok(!(await j.tempKeys()).some((x) => x.discord_id === "600"), "lifetime isn't temp");
+  // JNKIE ignoring the end date must never leave a live, endless key behind
+  const z = await j.generate("premium", 1440);
+  drop = (b) => (b.expires_at ? { expires_at: null } : {});
+  await assert.rejects(j.redeem("700", z), /didn't save expires_at/);
+  drop = null;
+  assert.ok(j.isPending(row(z)) && !j.active(row(z)) && !row(z).discord_id);
+  // checkpoint keys: freeKeyHours wins over JNKIE's own date, and a fresh one beats a stale one
+  const old = { created_at: new Date(Date.now() - 48 * 36e5).toISOString(), expires_at: new Date(Date.now() + 1e9).toISOString() };
+  assert.ok(!j.active(old) && j.best([old, { id: 9, created_at: new Date().toISOString() }]).id === 9);
   console.log("jnkie ok");
 })().catch((e) => { console.error(e); process.exit(1); });
