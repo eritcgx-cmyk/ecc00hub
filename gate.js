@@ -60,8 +60,9 @@ async function load(client) {
     if (!page.size) break;
     for (const m of page.values()) {
       const [kind, a, b, c] = m.content.split(" ");
-      if (kind === "link" && !links.has(a)) links.set(a, { discordId: b, hwid: c, msg: m });
-      else if (kind === "bind" && !binds.has(a)) binds.set(a, { hwid: b, msg: m });
+      // only the message id is kept: a whole Message per link/bind, held forever, was most of the bot's memory
+      if (kind === "link" && !links.has(a)) links.set(a, { discordId: b, hwid: c, msg: m.id });
+      else if (kind === "bind" && !binds.has(a)) binds.set(a, { hwid: b, msg: m.id });
     }
     before = page.last().id;
   }
@@ -82,17 +83,18 @@ async function refreshGames() {
   } catch (e) { console.error("[gate] games:", e.message); }
 }
 
+const dropMsg = (id) => id && dbChannel?.messages.delete(id).catch(() => {});
 async function saveLink(robloxId, discordId, hwid) {
   const old = links.get(robloxId);
-  if (old?.msg) old.msg.delete().catch(() => {});
+  dropMsg(old?.msg);
   const msg = await dbChannel.send(`link ${robloxId} ${discordId} ${hwid}`);
-  links.set(robloxId, { discordId, hwid, msg });
+  links.set(robloxId, { discordId, hwid, msg: msg.id });
 }
 function dropLinksOf(discordId) {
   let n = 0;
   for (const [robloxId, l] of links) {
     if (l.discordId !== discordId) continue;
-    l.msg?.delete().catch(() => {});
+    dropMsg(l.msg);
     links.delete(robloxId);
     n++;
   }
@@ -106,13 +108,13 @@ async function bindKey(key, hwid) {
   if (b) return b.hwid === hwid;
   const rec = { hwid, msg: null };
   binds.set(h, rec); // claimed before the await, so two devices at once can't both get in
-  try { rec.msg = await dbChannel.send(`bind ${h} ${hwid}`); } catch (e) { binds.delete(h); throw e; }
+  try { rec.msg = (await dbChannel.send(`bind ${h} ${hwid}`)).id; } catch (e) { binds.delete(h); throw e; }
   return true;
 }
 const isBound = (key) => binds.has(crypto.createHash("sha256").update(key).digest("hex"));
 function resetBind(key) {
   const h = crypto.createHash("sha256").update(key).digest("hex");
-  binds.get(h)?.msg?.delete().catch(() => {});
+  dropMsg(binds.get(h)?.msg);
   return binds.delete(h);
 }
 

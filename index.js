@@ -77,12 +77,15 @@ app.get("/api/tier/:discordId", async (req, res) => {
     res.status(502).json({ error: e.message });
   }
 });
+// Scripts ask with their games.json key; /update and /notify store under the bot's own key (games.js)
+const SITE_KEY = { da_hood: "dahood", hood_customs: "hoodc", a51: "verity", project_eternity: "eternity", closing_shift: "closing", sols_rng: "sols" };
+const botKey = (g) => SITE_KEY[g] || g;
 // In-game Info tab: this game's latest update posts (newest first). Public, read-only.
-app.get("/api/changelog/:game", (req, res) => res.json(changelog.get(String(req.params.game)).slice(0, 10)));
+app.get("/api/changelog/:game", (req, res) => res.json(changelog.get(botKey(String(req.params.game))).slice(0, 10)));
 // In-game cloud notifications for this game (plus ones for every game). Read-only; the UI checks once a minute.
 app.get("/api/notices/:game", (req, res) => {
   if (limited(req, "notices", 30, 60_000)) return res.status(429).json([]);
-  res.json(changelog.notices(String(req.params.game)));
+  res.json(changelog.notices(botKey(String(req.params.game))));
 });
 // Free (universal loader) scripts ask this on load: has staff made this script's premium features free?
 app.get("/api/free/:script", (req, res) => res.json({
@@ -192,6 +195,25 @@ app.post("/api/admin", express.json({ limit: "4kb" }), async (req, res) => {
   } else if (action === "testbasicplus") { // mint a Basic+ test key (unlocks Auto Farm only)
     try { return res.json({ ok: true, key: await jnkie.basicPlusKey(Number(value) || 1440) }); }
     catch (e) { return res.status(400).json({ error: e.message }); }
+  } else if (action === "redeemtest") { // value: discordId. Real round trip: make a free + a Basic+ key, redeem both
+    // for that account, read them back as the gate does, then delete them. Proves the panel's Redeem Key works.
+    const out = [], who = String(value || "");
+    if (!/^\d{5,20}$/.test(who)) return res.status(400).json({ error: "value = a Discord user id" });
+    for (const [plan, make] of [["free", () => jnkie.generate("free", 5)], ["basic+", () => jnkie.generate("basic+", 5)], ["checkpoint basic+", () => jnkie.basicPlusKey(5)]]) {
+      let made;
+      try {
+        made = await make();
+        await jnkie.redeem(who, made);
+        const k = await jnkie.keyByValue(made);
+        const mine = (await jnkie.keysFor(who)).some((x) => x.key_value === made);
+        // then launch Sol's RNG (Basic+ game) with it, the way the loader does
+        const g = await gate.session(client, { robloxId: "1", hwid: "redeemtest", placeId: "15532962292", key: made });
+        gate.resetBind(made);
+        out.push({ plan, ok: jnkie.active(k) && mine && jnkie.planOf(k) === plan.replace("checkpoint ", ""), active: jnkie.active(k), linked: mine, got: jnkie.planOf(k), sols: g.ok ? g.plan : g.reason });
+      } catch (e) { out.push({ plan, ok: false, error: e.message }); }
+      if (made) await jnkie.keyByValue(made).then((k) => k && jnkie.remove(k)).catch(() => {});
+    }
+    return res.json(out);
   } else if (action === "tempkeys") { // read-only: premium keys with a length; never returns key values
     return res.json((await jnkie.tempKeys()).map((k) => ({ discordId: k.discord_id, plan: jnkie.planOf(k), created: k.created_at, ends: k.expires_at, minutes: k.validity_minutes, noEnd: k.noEnd })));
   } else if (action === "restore") { // value: { build: {game: url}, verifyChannel, versions: {game: v} } — refill lost settings
@@ -410,7 +432,8 @@ async function redeemModal(i) {
   const value = i.fields.getTextInputValue("key").trim();
   if (!/^[\w-]{8,128}$/.test(value)) return i.editReply({ content: "That doesn't look like a key." });
   let key;
-  try { key = await jnkie.redeem(i.user.id, value); } catch (e) { return i.editReply({ content: e.message }); }
+  try { key = await jnkie.redeem(i.user.id, value); }
+  catch (e) { console.error(`[redeem] ${i.user.id}: ${e.message}`); return i.editReply({ content: e.message }); }
   redeemTries.delete(i.user.id);
   const plan = jnkie.planOf(key);
   if (jnkie.isPaid(plan) && i.guild) await premiumRole(i.guild, i.user.id, true);

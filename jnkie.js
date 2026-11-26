@@ -140,7 +140,8 @@ async function redeem(discordId, value) {
     const m = PENDING.exec(key.key_name || "");
     if (!m) { // a checkpoint key: just tie it to this Discord account
       if (!active(key)) throw new Error("That key is expired or already used.");
-      if (key.discord_id) throw new Error(key.discord_id === String(discordId) ? "That key is already yours." : "That key belongs to someone else.");
+      if (key.discord_id === String(discordId)) return key; // already linked to them (the get-key flow can do that)
+      if (key.discord_id) throw new Error("That key belongs to someone else.");
       await api("PUT", `/keys/${key.id}`, { discord_id: String(discordId) });
       return { ...key, discord_id: String(discordId) };
     }
@@ -228,6 +229,7 @@ async function unblacklist(key) {
 }
 
 // Cheap authenticated call, so a bad key shows up as an error instead of "configured".
+const remove = (key) => api("DELETE", `/keys/${key.id}`);
 const ping = () => api("GET", "/services").then((d) => (d.services || d).length);
 
-module.exports = { endsAt, best, isPaid, isPending, staffKey, keysFor, generate, redeem, tempKeys, lapsed, planOf, ready, ping, keyFor, keyByValue, whitelist, basicPlusKey, unwhitelist, resetHwid, blacklist, unblacklist, tierOf, active, expired, hwidsOf };
+module.exports = { remove, endsAt, best, isPaid, isPending, staffKey, keysFor, generate, redeem, tempKeys, lapsed, planOf, ready, ping, keyFor, keyByValue, whitelist, basicPlusKey, unwhitelist, resetHwid, blacklist, unblacklist, tierOf, active, expired, hwidsOf };
