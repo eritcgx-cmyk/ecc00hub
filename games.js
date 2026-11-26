@@ -9,8 +9,9 @@ module.exports = [
   { key: "verity",   name: "Survive Verity (Area 51)", place: 74716719697996 },
   { key: "eternity", name: "Project Eternity", place: 108438460215241 },
   { key: "closing",  name: "Closing Shift", place: 118297934142609 },
-  { key: "sols",     name: "Sol's RNG", place: 15532962292 },
+  { key: "sols",     name: "Sol's RNG", place: 15532962292, freemium: true },
   { key: "chessduels", name: "RoChess", place: 89083628291452 },
   { key: "catboy",   name: "Raise A Catboy", place: 129852792970565 },
   { key: "freedraw", name: "Free Draw", place: 1547610457, freemium: true },
+  { key: "hyperdraw", name: "Hyper Draw", place: 118868556321211, freemium: true },
 ];

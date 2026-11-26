@@ -972,8 +972,9 @@ async function openTicket(i, action) {
   const guild = i.guild;
   if (action === "close") {
     if (!(i.channel.topic || "").startsWith("ticket:")) return reply(i, { content: "This isn't a ticket." });
+    const ch = i.channel; // i.channel is null once the channel is gone (closed twice), which crashed the bot
     await i.reply({ content: "Closing in 5 seconds." });
-    return setTimeout(() => i.channel.delete().catch(() => {}), 5000);
+    return setTimeout(() => ch.delete().catch(() => {}), 5000);
   }
   const open = guild.channels.cache.find((c) => c.topic === `ticket:${i.user.id}`);
   if (open) return reply(i, { content: `You already have a ticket: ${open}` });
