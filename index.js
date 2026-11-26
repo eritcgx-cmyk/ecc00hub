@@ -15,10 +15,10 @@ const GAME_FEATURES = require("./features.json"); // rebuilt from the script sou
 const FAQ_SEED = [
   ["My key is invalid or expired", "Keys last 24 hours and lock to one device. Grab a fresh one with the Get Key button in the key channel (or eccohub.xyz/key), then paste it into the loader."],
   ["How do I get a key?", "Verify once by typing the phrase the loader shows you in the verify channel. Then press Get Key, finish the checkpoints, copy your key and paste it into the ECC00 loader."],
-  ["Basic vs Basic+ vs ECC00 Private", "Basic (1 checkpoint): every free feature. Basic+ (2 checkpoints): Basic plus FTF Auto Farm. ECC00 Private (paid): everything, premium features included. See /features for any game."],
+  ["Basic vs Basic+ vs ECC00 Private", "Basic (1 checkpoint): every free feature. Basic+ (2 checkpoints): Basic plus Free Draw, Hyper Draw, Sol's RNG and FTF Auto Farm. ECC00 Private (paid): everything, premium features included. See /features for any game."],
   ["This key is locked to another device", "Each key binds to the first device that runs it. Use Reset HWID in the key panel, then the same key works on your new device."],
   ["The script won't load / the loader does nothing", "Paste the whole loadstring and finish verify first. Sealed games load through our site, so give it a few seconds. Still stuck? Open a ticket."],
-  ["Premium features are greyed out", "Those need an ECC00 Private key; a free or Basic+ key shows them locked. FTF Auto Farm needs Basic+."],
+  ["Premium features are greyed out", "Those need an ECC00 Private key; a free or Basic+ key shows them locked. Free Draw, Hyper Draw, Sol's RNG and FTF Auto Farm need Basic+."],
   ["Do I have to verify every time?", "No. Your device stays linked after the first verify. You only paste a new key when the old one expires (24h)."],
   ["Is it safe? Will I get banned?", "Use any executor script at your own risk. We never ask for your password and never store it. Don't share your key with anyone."],
 ];
@@ -310,7 +310,7 @@ function gamesEmbed() {
     { name: `ECC00 Private (${paid.length})`, value: column(paid), inline: true },
     { name: `Basic + Private (${mid.length})`, value: column(mid), inline: true },
     { name: `Basic (${free.length})`, value: column(free), inline: true })
-    .setDescription("Plans: **Keyless**, **Basic** (1 checkpoint), **Basic+** (2 checkpoints, FTF Auto Farm), **ECC00 Private** (paid). `/features` lists every game's features by plan.");
+    .setDescription("Plans: **Keyless**, **Basic** (1 checkpoint), **Basic+** (2 checkpoints, Free Draw, Hyper Draw, Sol's RNG, FTF Auto Farm), **ECC00 Private** (paid). `/features` lists every game's features by plan.");
 }
 
 // /features: pick a game, see what each plan gets
@@ -320,7 +320,7 @@ const featuresMenu = () => new ActionRowBuilder().addComponents(new StringSelect
 function featuresEmbed(key) {
   const g = GAME_FEATURES[key];
   const e = brand(new EmbedBuilder()).setTitle(g ? `${g.name} features` : "Features by plan");
-  if (!g) return e.setDescription("Plans: **Keyless**, **Basic** (1 checkpoint), **Basic+** (2 checkpoints, adds FTF Auto Farm), **ECC00 Private** (paid).\nPick a game below.");
+  if (!g) return e.setDescription("Plans: **Keyless**, **Basic** (1 checkpoint), **Basic+** (2 checkpoints, adds Free Draw, Hyper Draw, Sol's RNG, FTF Auto Farm), **ECC00 Private** (paid).\nPick a game below.");
   e.setDescription("Each plan also gets everything in the plans above it.");
   for (const [plan, list] of Object.entries(g.plans)) {
     let chunk = "", n = 0; // embed fields cap at 1024 chars
@@ -350,6 +350,8 @@ async function refreshBoard() {
 // ---------------------------------------------------------------- panels
 const BANNER = path.join(__dirname, "public", "getkey.gif");
 const PRICES = ["**Weekly** `2.50 USD` · `400 Robux`", "**Monthly** `6 USD` · `800 Robux`", "**Lifetime** `12 USD` · `1,500 Robux`"].join("\n");
+const PAYMENTS = "Bitcoin · Gift Cards · PayPal · Cash App · Venmo · Apple Pay · Robux";
+const BASIC_PLUS = "adds Free Draw, Hyper Draw, Sol's RNG and FTF Auto Farm";
 const text = (t) => new TextDisplayBuilder().setContent(t);
 const row = (...b) => new ActionRowBuilder().addComponents(...b);
 const btn = (id, label, style = ButtonStyle.Secondary) => new ButtonBuilder().setCustomId(id).setLabel(label).setStyle(style);
@@ -367,9 +369,29 @@ function getKeyPanel() {
     .addTextDisplayComponents(text(`## Premium\n${PRICES}\n\nEvery premium feature in every game.`))
     .addActionRowComponents(row(btn("ticket:buy", "Buy Premium", ButtonStyle.Primary)))
     .addSeparatorComponents(new SeparatorBuilder())
-    .addTextDisplayComponents(text(`### FREE ACCESS\n**Free** 1 checkpoint, all free features, ${gate.settings().freeKeyHours || 24} hours\n**Basic+** 2 checkpoints, adds FTF Auto Farm, ${gate.settings().freeKeyHours || 24} hours`))
+    .addTextDisplayComponents(text(`### FREE ACCESS\n**Free** 1 checkpoint, all free features, ${gate.settings().freeKeyHours || 24} hours\n**Basic+** 2 checkpoints, ${BASIC_PLUS}, ${gate.settings().freeKeyHours || 24} hours`))
     .addActionRowComponents(row(...keyLinks()))
     .addTextDisplayComponents(text("-# Verify first: type the phrase the loader shows you, then paste your key into the loader.")));
+}
+
+// /panel type:Prices & FAQ
+function pricesPanel() {
+  const hours = gate.settings().freeKeyHours || 24;
+  return cardMsg(card()
+    .addTextDisplayComponents(text(`## Premium\n${PRICES}\n\nEvery premium feature in every game.`))
+    .addTextDisplayComponents(text(`### WE ACCEPT\n${PAYMENTS}`))
+    .addActionRowComponents(row(btn("ticket:buy", "Buy Premium", ButtonStyle.Primary)))
+    .addSeparatorComponents(new SeparatorBuilder())
+    .addTextDisplayComponents(text(`### FREE ACCESS\n**Free** 1 checkpoint, all free features, ${hours} hours\n**Basic+** 2 checkpoints, ${BASIC_PLUS}, ${hours} hours`))
+    .addActionRowComponents(row(...keyLinks()))
+    .addSeparatorComponents(new SeparatorBuilder())
+    .addTextDisplayComponents(text([
+      "### FAQ",
+      "**How do I buy?** Press Buy Premium, pick a length and how you'll pay. Staff send your key in the ticket.",
+      "**How do I use my key?** Redeem it in the control panel, then press Get Script.",
+      "**Why is a feature greyed out?** It needs a higher plan. Locked features say which one.",
+      "**Is my key tied to my device?** Yes, one device per key. Reset HWID in the control panel when you switch.",
+    ].join("\n"))));
 }
 
 function controlPanel() {
@@ -513,7 +535,7 @@ const gateChoices = () => [{ name: "Loader (default)", value: "loader" }, { name
 const buildCmds = () => [
   new SlashCommandBuilder().setName("panel").setDescription("Post a panel").setDefaultMemberPermissions(staff)
     .addStringOption((o) => o.setName("type").setDescription("Which panel").setRequired(true)
-      .addChoices({ name: "Control panel", value: "control" }, { name: "Get key", value: "getkey" })),
+      .addChoices({ name: "Control panel", value: "control" }, { name: "Get key", value: "getkey" }, { name: "Prices & FAQ", value: "prices" })),
   new SlashCommandBuilder().setName("generatekey").setDescription("Make keys people redeem in the panel").setDefaultMemberPermissions(staff)
     .addStringOption((o) => o.setName("plan").setDescription("Plan").setRequired(true)
       .addChoices({ name: "Free", value: "free" }, { name: "Basic+", value: "basic+" }, { name: "Premium", value: "premium" }))
@@ -722,7 +744,7 @@ async function onCommand(i) {
     }
     case "panel":
       await i.deferReply({ ephemeral: true }); // the banner upload can take a few seconds
-      await i.channel.send(o.getString("type") === "control" ? controlPanel() : getKeyPanel());
+      await i.channel.send({ control: controlPanel, getkey: getKeyPanel, prices: pricesPanel }[o.getString("type")]());
       return reply(i, { content: "Panel posted." });
 
     case "generatekey": {
