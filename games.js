@@ -10,6 +10,7 @@ module.exports = [
   { key: "eternity", name: "Project Eternity", place: 108438460215241 },
   { key: "closing",  name: "Closing Shift", place: 118297934142609 },
   { key: "sols",     name: "Sol's RNG", place: 15532962292, freemium: true },
+  { key: "last_letter", name: "Last Letter", place: 129866685202296 },
   { key: "chessduels", name: "RoChess", place: 89083628291452 },
   { key: "catboy",   name: "Raise A Catboy", place: 129852792970565 },
   { key: "freedraw", name: "Free Draw", place: 1547610457, freemium: true },
