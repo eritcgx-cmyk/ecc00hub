@@ -15,5 +15,5 @@ module.exports = [
   { key: "catboy",   name: "Raise A Catboy", place: 129852792970565 },
   { key: "freedraw", name: "Free Draw", place: 1547610457, freemium: true },
   { key: "hyperdraw", name: "Hyper Draw", place: 118868556321211, freemium: true },
-  { key: "gakuran",  name: "Gakuran", place: 128736949265057 },
+  { key: "gakuran",  name: "Gakuran", paid: true, place: 128736949265057 },
 ];
